@@ -1,11 +1,8 @@
 # Beacon Run
 
-<p align="center">
-  <img width="250" alt="cobaltstrike_beaconrun"
-       src="https://github.com/user-attachments/assets/f8ae37ae-d3e4-4ef8-86ee-df0a0a4cc5ef" />
-</p>
-
 A **3-lane infinite runner** based on the universe of Cobalt Strike.
+
+Play it here: https://zurro.github.io/beacon-run/index.html
 
 ## Controls:
   - **Left/Right**: change lanes
