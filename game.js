@@ -5,11 +5,13 @@
   const W = 480, H = 800;
   const LANES = [120, 240, 360];
 
+  const storedTouchButtons = localStorage.getItem('beacon_runner_touch_buttons');
   const settings = {
     muted: localStorage.getItem('beacon_runner_mute') === '1',
     haptics: localStorage.getItem('beacon_runner_haptics') !== '0',
     fpsLimit: Number(localStorage.getItem('beacon_runner_fps') || '60'),
-    reducedMotion: window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    reducedMotion: window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+    touchButtons: storedTouchButtons === null ? false : storedTouchButtons !== '0'
   };
 
   if(window.matchMedia){
@@ -141,6 +143,7 @@
     localStorage.setItem('beacon_runner_mute', settings.muted ? '1' : '0');
     localStorage.setItem('beacon_runner_haptics', settings.haptics ? '1' : '0');
     localStorage.setItem('beacon_runner_fps', String(settings.fpsLimit));
+    localStorage.setItem('beacon_runner_touch_buttons', settings.touchButtons ? '1' : '0');
   }
 
   function saveTotals(){
@@ -285,11 +288,18 @@
   const muteBtn = document.getElementById('muteBtn');
   const hapticsBtn = document.getElementById('hapticsBtn');
   const fpsBtn = document.getElementById('fpsBtn');
+  const touchBtn = document.getElementById('touchBtn');
+
+  function applyTouchButtons(){
+    document.body.classList.toggle('show-touch', settings.touchButtons);
+    document.body.classList.toggle('hide-touch', !settings.touchButtons);
+  }
 
   function updateToggleLabels(){
     if(muteBtn) muteBtn.textContent = settings.muted ? 'Sound: Off' : 'Sound: On';
     if(hapticsBtn) hapticsBtn.textContent = settings.haptics ? 'Haptics: On' : 'Haptics: Off';
     if(fpsBtn) fpsBtn.textContent = settings.fpsLimit ? ('FPS: ' + settings.fpsLimit) : 'FPS: Unlimited';
+    if(touchBtn) touchBtn.textContent = settings.touchButtons ? 'Buttons: On' : 'Buttons: Off';
   }
 
   if(muteBtn){
@@ -320,6 +330,16 @@
     });
   }
 
+  if(touchBtn){
+    touchBtn.addEventListener('click', ()=>{
+      settings.touchButtons = !settings.touchButtons;
+      saveSettings();
+      applyTouchButtons();
+      updateToggleLabels();
+    });
+  }
+
+  applyTouchButtons();
   updateToggleLabels();
 
   function onEnter(){

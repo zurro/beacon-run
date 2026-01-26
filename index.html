@@ -73,12 +73,13 @@
     }
 
     @media (pointer: coarse){
-      .touch-pad{ display:flex; flex-direction:column; }
+      body.show-touch .touch-pad{ display:flex; flex-direction:column; }
+      body.hide-touch .touch-pad{ display:none; }
       .toggles{ top:10px; right:10px; }
     }
   </style>
 </head>
-<body>
+<body class="hide-touch">
   <div class="wrap">
     <canvas id="game" width="480" height="800" aria-label="Infinite runner game"></canvas>
   </div>
@@ -87,6 +88,7 @@
       <button id="muteBtn" class="toggle-btn" type="button">Sound: On</button>
       <button id="hapticsBtn" class="toggle-btn" type="button">Haptics: On</button>
       <button id="fpsBtn" class="toggle-btn" type="button">FPS: 60</button>
+      <button id="touchBtn" class="toggle-btn" type="button">Buttons: On</button>
     </div>
     <div class="touch-pad" aria-hidden="true">
       <div class="touch-row">
