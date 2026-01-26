@@ -7,7 +7,7 @@ Play it here: https://zurro.github.io/beacon-run/index.html
 ## Controls:
   - **Left/Right**: change lanes
   - **Up**: jump (avoid tall barriers)
-  - **Down**: slide (avoid low barriers)
+  - **Down**: slide
   - **Space**: pause
   - Mobile: swipe left/right/up/down
 
