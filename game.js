@@ -251,6 +251,9 @@
     const t=e.changedTouches[0];
     touchStart={x:t.clientX,y:t.clientY,time:performance.now()};
   }, {passive:true});
+  canvas.addEventListener('touchmove', (e)=>{
+    if(state.mode==='playing') e.preventDefault();
+  }, {passive:false});
   canvas.addEventListener('touchend', (e)=>{
     if(!touchStart) return;
     const t=e.changedTouches[0];
