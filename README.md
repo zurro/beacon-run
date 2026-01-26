@@ -1,6 +1,8 @@
-# Beacon Runner
+# Beacon Run
 
-A Temple-Run–style **3-lane infinite runner** based on the universe of Cobalt Strike.
+A **3-lane infinite runner** based on the universe of Cobalt Strike.
+
+Play it here: https://zurro.github.io/beacon-run/index.html
 
 ## Controls:
   - **Left/Right**: change lanes
