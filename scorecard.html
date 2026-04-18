@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'" />
+  <title>Beacon Runner Scorecard</title>
+  <style>
+    :root{
+      --cyan:#00ffd8;
+      --bg:#0b1014;
+      --text:#e8f7ff;
+      --muted:rgba(232,247,255,0.66);
+      --accent:#ffb84d;
+      --danger:#ff7c5a;
+    }
+    *{ box-sizing:border-box; }
+    html,body{ height:100%; min-height:100%; margin:0; background:var(--bg); color:var(--text); font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; }
+    body::before{
+      content:"";
+      position:fixed;
+      inset:0;
+      background:
+        radial-gradient(60% 50% at 50% 20%, rgba(0,255,216,0.12), rgba(0,0,0,0) 60%),
+        radial-gradient(50% 40% at 20% 80%, rgba(255,184,77,0.10), rgba(0,0,0,0) 55%),
+        radial-gradient(40% 35% at 80% 80%, rgba(123,92,255,0.10), rgba(0,0,0,0) 55%);
+      pointer-events:none;
+      z-index:0;
+    }
+    .controls{ position:fixed; inset:0; pointer-events:none; z-index:2; }
+    .toggles{
+      position:fixed;
+      right:12px;
+      top:12px;
+      display:flex;
+      flex-wrap:wrap;
+      gap:8px;
+      pointer-events:auto;
+      justify-content:flex-end;
+      max-width:min(92vw, 720px);
+    }
+    .toggle-btn{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      text-decoration:none;
+      background:rgba(8,17,24,0.8);
+      color:rgba(232,247,255,0.9);
+      border:1px solid rgba(0,255,216,.35);
+      border-radius:10px;
+      padding:6px 10px;
+      font-size:12px;
+      font-weight:700;
+      cursor:pointer;
+      backdrop-filter:blur(6px);
+      min-height:38px;
+    }
+    .toggle-btn.primary{ background:linear-gradient(135deg, rgba(0,255,216,.18), rgba(0,255,216,.08)); }
+    .toggle-btn.danger{
+      border-color:rgba(255,124,90,.34);
+      background:linear-gradient(135deg, rgba(255,124,90,.16), rgba(255,124,90,.06));
+    }
+    .toggle-btn:disabled{ opacity:.45; cursor:not-allowed; }
+    .wrap{
+      min-height:100%;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding:76px 16px 20px;
+      position:relative;
+      z-index:1;
+    }
+    .board-shell{
+      width:min(540px, 94vw);
+      max-height:min(820px, calc(100vh - 110px));
+      overflow:auto;
+      background:linear-gradient(180deg, rgba(11,22,28,0.95), rgba(5,12,16,0.96));
+      border:1px solid rgba(0,255,216,.28);
+      border-radius:22px;
+      box-shadow:0 18px 60px rgba(0,0,0,.42), 0 0 30px rgba(0,255,216,.08);
+      padding:22px 22px 18px;
+    }
+    .logo{
+      width:min(220px, 60vw);
+      display:block;
+      margin:0 0 10px;
+      filter:drop-shadow(0 0 24px rgba(0,255,216,.12));
+    }
+    .board-kicker{
+      margin:0 0 8px;
+      font-size:11px;
+      letter-spacing:.28em;
+      text-transform:uppercase;
+      color:rgba(0,255,216,.7);
+    }
+    .board-head{
+      display:flex;
+      align-items:end;
+      justify-content:space-between;
+      gap:12px;
+      margin-bottom:16px;
+    }
+    .board-title{
+      margin:0;
+      font-size:34px;
+      line-height:1;
+      font-weight:800;
+      letter-spacing:.04em;
+    }
+    .board-meta{
+      font-size:12px;
+      color:rgba(232,247,255,.56);
+      text-align:right;
+    }
+    .score-list{
+      list-style:none;
+      margin:0;
+      padding:0;
+      display:flex;
+      flex-direction:column;
+      gap:8px;
+    }
+    .score-row{
+      display:grid;
+      grid-template-columns:32px 1fr auto;
+      align-items:center;
+      gap:12px;
+      padding:10px 12px;
+      border-radius:14px;
+      background:rgba(255,255,255,.03);
+      border:1px solid rgba(255,255,255,.05);
+      font-family:"Consolas","Courier New",monospace;
+    }
+    .score-row.top-three{
+      border-color:rgba(255,184,77,.2);
+      background:linear-gradient(90deg, rgba(255,184,77,.10), rgba(255,255,255,.03));
+    }
+    .rank{ color:rgba(232,247,255,.54); font-size:12px; }
+    .name{ font-size:18px; letter-spacing:.18em; color:rgba(232,247,255,.92); }
+    .value{ font-size:17px; color:rgba(0,255,216,.88); }
+    .empty{
+      padding:28px 18px;
+      border-radius:18px;
+      border:1px dashed rgba(0,255,216,.18);
+      color:rgba(232,247,255,.62);
+      text-align:center;
+      line-height:1.6;
+    }
+    @media (max-width: 640px){
+      .wrap{ padding-top:96px; }
+      .board-shell{ width:min(96vw, 540px); padding:20px 16px 16px; }
+      .board-head{ flex-direction:column; align-items:flex-start; }
+      .board-meta{ text-align:left; }
+      .score-row{ grid-template-columns:28px 1fr auto; gap:10px; }
+      .name{ font-size:16px; letter-spacing:.12em; }
+      .value{ font-size:15px; }
+      .toggles{ right:10px; top:10px; max-width:94vw; }
+    }
+  </style>
+</head>
+<body>
+  <div class="controls">
+    <div class="toggles">
+      <a class="toggle-btn primary" href="index.html">Wasteland Mode</a>
+      <a class="toggle-btn" href="classic.html">Classic Mode</a>
+      <button id="resetScoresBtn" class="toggle-btn danger" type="button">Reset Leaderboard</button>
+    </div>
+  </div>
+
+  <main class="wrap">
+    <section class="board-shell" aria-labelledby="boardTitle">
+      <img class="logo" src="assets/beaconrun.png" alt="Beacon Runner" />
+      <p class="board-kicker">Local Leaderboard</p>
+      <div class="board-head">
+        <h1 id="boardTitle" class="board-title">Top 10 Scores</h1>
+        <div id="boardMeta" class="board-meta">Top 10 saved locally</div>
+      </div>
+      <ol id="scorecardList" class="score-list"></ol>
+      <div id="scorecardEmpty" class="empty" hidden>No scores yet. Finish a run, save your arcade name, and the board will light up.</div>
+    </section>
+  </main>
+
+  <script src="score-utils.js"></script>
+  <script src="dom-utils.js"></script>
+  <script src="scorecard.js"></script>
+</body>
+</html>

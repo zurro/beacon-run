@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'" />
+  <title>Beacon Runner Classic Mode</title>
+  <style>
+    :root{
+      --cyan:#00ffd8;
+      --bg:#0b1014;
+      --text:#e8f7ff;
+      --accent:#ffb84d;
+      --panel:rgba(8,17,24,0.9);
+      --safe-top:max(10px, env(safe-area-inset-top));
+      --safe-right:max(10px, env(safe-area-inset-right));
+      --safe-bottom:max(10px, env(safe-area-inset-bottom));
+      --safe-left:max(10px, env(safe-area-inset-left));
+      --app-height:100svh;
+    }
+    html,body{ height:100%; min-height:100%; margin:0; background:var(--bg); font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; overscroll-behavior: none; touch-action: none; }
+    body::before{
+      content:"";
+      position:fixed;
+      inset:0;
+      background:
+        radial-gradient(60% 50% at 50% 20%, rgba(0,255,216,0.12), rgba(0,0,0,0) 60%),
+        radial-gradient(50% 40% at 20% 80%, rgba(255,184,77,0.10), rgba(0,0,0,0) 55%),
+        radial-gradient(40% 35% at 80% 80%, rgba(123,92,255,0.10), rgba(0,0,0,0) 55%);
+      pointer-events:none;
+      z-index:0;
+    }
+    .wrap{
+      min-height:var(--app-height);
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding:calc(var(--safe-top) + 12px) calc(var(--safe-right) + 12px) calc(var(--safe-bottom) + 12px) calc(var(--safe-left) + 12px);
+      box-sizing:border-box;
+      position:relative;
+      z-index:1;
+    }
+    #game{
+      width:min(100vw, calc(100vh * 0.6));
+      height:auto;
+      aspect-ratio: 480 / 800;
+      max-height: 100vh;
+      border:2px solid rgba(0,255,216,.55);
+      box-shadow:0 0 32px rgba(0,255,216,.18);
+      background:#081118;
+      touch-action: none;
+    }
+    .controls{ position:fixed; inset:0; pointer-events:none; z-index:2; }
+    .toggles{
+      position:fixed; right:12px; top:12px; display:flex; gap:8px; pointer-events:auto; max-width:min(92vw, 900px);
+    }
+    .toggle-btn{
+      display:inline-flex; align-items:center; justify-content:center; text-decoration:none;
+      background:rgba(8,17,24,0.8); color:rgba(232,247,255,0.9); border:1px solid rgba(0,255,216,.35);
+      border-radius:10px; padding:6px 10px; font-size:12px; cursor:pointer;
+      backdrop-filter: blur(6px);
+    }
+    .toggle-label{
+      cursor:default;
+      background:rgba(255,184,77,0.14);
+      border-color:rgba(255,184,77,0.28);
+      color:rgba(255,236,210,0.92);
+    }
+    .touch-pad{
+      position:fixed; bottom:18px; left:50%; transform:translateX(-50%); display:none;
+      gap:12px; pointer-events:auto;
+    }
+    .touch-btn{
+      width:64px; height:64px; border-radius:16px; border:1px solid rgba(0,255,216,.4);
+      background:rgba(8,17,24,0.7); color:rgba(232,247,255,.9); font-size:18px; font-weight:700;
+    }
+    .touch-row{ display:flex; gap:12px; justify-content:center; }
+    .hud{ position:fixed; inset:0; pointer-events:none; display:flex; justify-content:center; }
+    .hint{ position:absolute; bottom:10px; color:rgba(232,247,255,.75); font-size:12px; text-align:center; width:min(520px,92vw); line-height:1.35; }
+    .badge{ display:inline-block; padding:2px 8px; border:1px solid rgba(0,255,216,.45); border-radius:999px; margin:0 4px; }
+    .score-modal{
+      position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
+      padding:18px; box-sizing:border-box; z-index:4;
+      background:rgba(2,7,10,0.6);
+      backdrop-filter: blur(8px);
+    }
+    .score-modal[hidden]{ display:none; }
+    .score-shell{
+      width:min(440px, 92vw); max-height:min(760px, 92vh); overflow:auto;
+      background:linear-gradient(180deg, rgba(11,22,28,0.95), rgba(5,12,16,0.96));
+      border:1px solid rgba(0,255,216,.28);
+      border-radius:22px;
+      box-shadow:0 18px 60px rgba(0,0,0,.42), 0 0 30px rgba(0,255,216,.08);
+      padding:22px 22px 18px;
+      color:var(--text);
+    }
+    .score-kicker{
+      margin:0 0 8px; font-size:11px; letter-spacing:.28em; text-transform:uppercase; color:rgba(0,255,216,.7);
+    }
+    .score-title{
+      margin:0; font-size:34px; line-height:1; font-weight:800; letter-spacing:.04em;
+    }
+    .score-subtitle{
+      margin:10px 0 0; color:rgba(232,247,255,.72); font-size:14px; line-height:1.45;
+    }
+    .score-final{
+      display:flex; align-items:end; justify-content:space-between; gap:12px;
+      margin:20px 0 14px; padding:14px 16px;
+      border-radius:16px; background:rgba(255,255,255,.035); border:1px solid rgba(0,255,216,.14);
+    }
+    .score-final-label{ margin:0; font-size:11px; letter-spacing:.24em; text-transform:uppercase; color:rgba(232,247,255,.62); }
+    .score-final-value{ margin:4px 0 0; font-size:38px; line-height:1; font-weight:800; color:var(--accent); }
+    .score-status{ font-size:12px; color:rgba(0,255,216,.76); text-align:right; }
+    .score-entry{ margin:0 0 18px; }
+    .score-entry[hidden]{ display:none; }
+    .score-entry-label{ display:block; font-size:12px; text-transform:uppercase; letter-spacing:.18em; color:rgba(232,247,255,.7); margin-bottom:10px; }
+    .score-entry-input{
+      width:100%; box-sizing:border-box;
+      border-radius:14px; border:1px solid rgba(0,255,216,.28); background:rgba(2,10,13,.86); color:var(--text);
+      padding:14px 16px; font:700 28px/1.1 "Consolas","Courier New",monospace; letter-spacing:.32em; text-transform:uppercase;
+      outline:none;
+    }
+    .score-entry-input:focus{ border-color:rgba(0,255,216,.55); box-shadow:0 0 0 3px rgba(0,255,216,.12); }
+    .score-entry-hint{ margin:8px 0 0; font-size:12px; color:rgba(232,247,255,.56); }
+    .score-list-wrap{ margin-top:10px; }
+    .score-list-head{
+      display:flex; align-items:center; justify-content:space-between; gap:12px;
+      margin-bottom:10px;
+    }
+    .score-list-title{ margin:0; font-size:13px; letter-spacing:.16em; text-transform:uppercase; color:rgba(232,247,255,.72); }
+    .score-list-note{ font-size:12px; color:rgba(232,247,255,.5); }
+    .score-list{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:8px; }
+    .score-row{
+      display:grid; grid-template-columns:32px 1fr auto; align-items:center; gap:12px;
+      padding:10px 12px; border-radius:14px;
+      background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.05);
+      font-family:"Consolas","Courier New",monospace;
+    }
+    .score-row.is-pending{ border-color:rgba(255,184,77,.45); background:rgba(255,184,77,.08); }
+    .score-rank{ color:rgba(232,247,255,.54); font-size:12px; }
+    .score-name{ font-size:18px; letter-spacing:.18em; color:rgba(232,247,255,.92); }
+    .score-value{ font-size:17px; color:rgba(0,255,216,.88); }
+    .score-actions{
+      display:flex; flex-wrap:wrap; gap:10px; margin-top:18px;
+    }
+    .score-action{
+      flex:1 1 150px; min-height:44px; border-radius:14px; border:1px solid rgba(0,255,216,.28);
+      background:rgba(8,17,24,.76); color:var(--text); text-decoration:none; cursor:pointer;
+      display:inline-flex; align-items:center; justify-content:center; padding:0 14px; font-size:13px; font-weight:700;
+    }
+    .score-action.primary{ background:linear-gradient(135deg, rgba(0,255,216,.18), rgba(0,255,216,.08)); }
+    .score-action:disabled{ opacity:.45; cursor:not-allowed; }
+
+    @media (orientation: landscape){
+      .wrap{ flex-direction:row; gap:16px; padding:16px; }
+      #game{
+        width:min(70vw, calc(100vh * 0.75));
+        max-height: 92vh;
+      }
+      .hud{ position:fixed; }
+      .hint{
+        position:fixed;
+        right:16px;
+        bottom:16px;
+        width:240px;
+        text-align:left;
+        background:rgba(0,0,0,0.35);
+        padding:8px 10px;
+        border-radius:10px;
+        border:1px solid rgba(0,255,216,.25);
+      }
+    }
+
+    @media (pointer: coarse){
+      body.show-touch .touch-pad{ display:flex; flex-direction:column; }
+      body.hide-touch .touch-pad{ display:none; }
+      .toggles{
+        top:var(--safe-top);
+        left:var(--safe-left);
+        right:var(--safe-right);
+        max-width:none;
+        overflow-x:auto;
+        padding-bottom:4px;
+        -webkit-overflow-scrolling:touch;
+        scrollbar-width:none;
+      }
+      .toggles::-webkit-scrollbar{ display:none; }
+    }
+
+    @media (max-width: 560px){
+      .hint{
+        bottom:calc(var(--safe-bottom) + 88px);
+        width:min(92vw, 400px);
+        background:rgba(0,0,0,0.35);
+        padding:8px 10px;
+        border-radius:10px;
+        border:1px solid rgba(0,255,216,.22);
+      }
+      .score-title{ font-size:28px; }
+      .score-final-value{ font-size:32px; }
+      .score-entry-input{ font-size:24px; letter-spacing:.24em; }
+      .score-row{ grid-template-columns:28px 1fr auto; gap:10px; }
+      .score-name{ font-size:16px; letter-spacing:.12em; }
+      .score-value{ font-size:15px; }
+    }
+  </style>
+</head>
+<body class="hide-touch">
+  <div class="wrap">
+    <canvas id="game" width="480" height="800" aria-label="Infinite runner game"></canvas>
+  </div>
+  <div class="controls">
+    <div class="toggles">
+      <span class="toggle-btn toggle-label">Classic Mode</span>
+      <button id="muteBtn" class="toggle-btn" type="button">Sound: On</button>
+      <button id="hapticsBtn" class="toggle-btn" type="button">Haptics: On</button>
+      <button id="fpsBtn" class="toggle-btn" type="button">FPS: 60</button>
+      <button id="touchBtn" class="toggle-btn" type="button">Buttons: On</button>
+      <a id="wastelandLink" class="toggle-btn" href="index.html">Wasteland Mode</a>
+      <a id="scoresLink" class="toggle-btn" href="scorecard.html">Scores</a>
+    </div>
+    <div class="touch-pad" aria-hidden="true">
+      <div class="touch-row">
+        <button class="touch-btn" data-action="left" type="button">◀</button>
+        <button class="touch-btn" data-action="right" type="button">▶</button>
+      </div>
+      <div class="touch-row">
+        <button class="touch-btn" data-action="jump" type="button">⤒</button>
+        <button class="touch-btn" data-action="slide" type="button">⤓</button>
+      </div>
+    </div>
+  </div>
+  <div class="hud">
+    <div class="hint">
+      <span class="badge">←/→</span> change lanes &nbsp; <span class="badge">↑</span> jump &nbsp; <span class="badge">↓</span> slide &nbsp; <span class="badge">Space</span> pause<br/>
+      On mobile: swipe left/right/up/down
+    </div>
+  </div>
+  <div id="scoreModal" class="score-modal" hidden>
+    <section class="score-shell" aria-labelledby="scoreModalTitle">
+      <p class="score-kicker">Run Complete</p>
+      <h2 id="scoreModalTitle" class="score-title">Scorecard</h2>
+      <p id="scoreModalSubtitle" class="score-subtitle">Your run is over. Save your initials if you made the board and jump back in when you're ready.</p>
+      <div class="score-final">
+        <div>
+          <p class="score-final-label">Final Score</p>
+          <p id="scoreModalScore" class="score-final-value">0</p>
+        </div>
+        <div id="scoreModalStatus" class="score-status">Top 10 ready</div>
+      </div>
+      <div id="scoreEntrySection" class="score-entry" hidden>
+        <label class="score-entry-label" for="scoreNameInput">Enter your name</label>
+        <input id="scoreNameInput" class="score-entry-input" type="text" inputmode="text" maxlength="6" autocomplete="off" spellcheck="false" placeholder="______" />
+        <p id="scoreEntryHint" class="score-entry-hint">Use up to 6 letters. The board updates live while you type.</p>
+      </div>
+      <div class="score-list-wrap">
+        <div class="score-list-head">
+          <h3 class="score-list-title">Top 10 Runs</h3>
+          <span id="scoreListNote" class="score-list-note">Local machine</span>
+        </div>
+        <ol id="scoreList" class="score-list"></ol>
+      </div>
+      <div class="score-actions">
+        <button id="saveScoreBtn" class="score-action primary" type="button">Save Score</button>
+        <button id="retryBtn" class="score-action" type="button">Play Again</button>
+        <a id="viewScorecardBtn" class="score-action" href="scorecard.html">Open Scorecard Page</a>
+      </div>
+    </section>
+  </div>
+  <script src="score-utils.js"></script>
+  <script src="dom-utils.js"></script>
+  <script src="game.js"></script>
+</body>
+</html>

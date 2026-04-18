@@ -1,0 +1,488 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'" />
+  <title>Beacon Runner</title>
+  <style>
+    :root{
+      --cyan:#00ffd8;
+      --bg:#0b1014;
+      --text:#e8f7ff;
+      --muted:rgba(232,247,255,0.7);
+      --accent:#ffb84d;
+      --danger:#ff7c5a;
+      --panel:rgba(8,17,24,0.88);
+      --panel-border:rgba(0,255,216,.26);
+      --safe-top:max(10px, env(safe-area-inset-top));
+      --safe-right:max(10px, env(safe-area-inset-right));
+      --safe-bottom:max(10px, env(safe-area-inset-bottom));
+      --safe-left:max(10px, env(safe-area-inset-left));
+      --app-height:100svh;
+    }
+    *{ box-sizing:border-box; }
+    html,body{ height:100%; min-height:100%; margin:0; background:var(--bg); color:var(--text); font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; overscroll-behavior:none; overflow:hidden; touch-action:none; }
+    body::before{
+      content:"";
+      position:fixed;
+      inset:0;
+      background:
+        radial-gradient(60% 50% at 50% 20%, rgba(0,255,216,0.12), rgba(0,0,0,0) 60%),
+        radial-gradient(50% 40% at 20% 80%, rgba(255,184,77,0.10), rgba(0,0,0,0) 55%),
+        radial-gradient(40% 35% at 80% 80%, rgba(123,92,255,0.10), rgba(0,0,0,0) 55%);
+      pointer-events:none;
+    }
+    .page{
+      position:relative;
+      z-index:1;
+      min-height:var(--app-height);
+      display:block;
+      padding:0;
+    }
+    .topbar{
+      position:fixed;
+      top:var(--safe-top);
+      left:0;
+      right:0;
+      z-index:4;
+      display:flex;
+      align-items:center;
+      justify-content:flex-end;
+      gap:8px;
+      padding:0 max(12px, var(--safe-right)) 0 max(12px, var(--safe-left));
+      pointer-events:none;
+      transition:opacity .2s ease;
+    }
+    .brand{ display:none; }
+    .brand-logo{ width:112px; max-width:30vw; filter:drop-shadow(0 0 16px rgba(0,255,216,.14)); }
+    .eyebrow{ margin:0 0 3px; font-size:10px; text-transform:uppercase; letter-spacing:.24em; color:rgba(0,255,216,.72); }
+    .title{ margin:0; font-size:clamp(0.95rem, 1.6vw, 1.2rem); line-height:1.02; font-weight:800; letter-spacing:.08em; text-transform:uppercase; }
+    .subtitle{ margin:3px 0 0; font-size:11px; color:rgba(232,247,255,.58); max-width:30ch; }
+    .actions{
+      display:flex;
+      flex-wrap:wrap;
+      gap:10px;
+      justify-content:flex-end;
+      pointer-events:auto;
+      max-width:min(100%, 920px);
+    }
+    .action{
+      min-height:38px;
+      padding:0 12px;
+      border-radius:10px;
+      border:1px solid rgba(0,255,216,.35);
+      background:rgba(8,17,24,0.8);
+      color:rgba(232,247,255,0.9);
+      text-decoration:none;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      font-size:12px;
+      font-weight:700;
+      cursor:pointer;
+      text-transform:uppercase;
+      letter-spacing:.08em;
+      white-space:nowrap;
+      pointer-events:auto;
+      backdrop-filter:blur(6px);
+    }
+    .action.primary{ background:linear-gradient(135deg, rgba(0,255,216,.18), rgba(0,255,216,.08)); }
+    .layout{ display:block; min-height:var(--app-height); }
+    .stage{
+      position:relative;
+      overflow:hidden;
+      border-radius:0;
+      border:none;
+      background:#081118;
+      box-shadow:none;
+      min-height:var(--app-height);
+      height:var(--app-height);
+    }
+    #runCanvas{ width:100%; height:100%; display:block; background:#081118; }
+    .stage-overlay{ display:none; }
+    .poster{ max-width:380px; }
+    .poster h2{ margin:0; font-size:clamp(1.9rem, 3vw, 3.3rem); line-height:.94; font-weight:850; letter-spacing:.08em; text-transform:uppercase; max-width:11ch; }
+    .poster p{ margin:10px 0 0; color:rgba(232,247,255,.76); font-size:14px; line-height:1.52; max-width:34ch; }
+    .chip-row{ display:flex; flex-wrap:wrap; gap:10px; }
+    .chip{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      min-height:34px;
+      padding:0 12px;
+      border-radius:999px;
+      border:1px solid rgba(0,255,216,.22);
+      background:rgba(28,20,14,0.68);
+      color:rgba(232,247,255,.84);
+      font-size:12px;
+      letter-spacing:.08em;
+      text-transform:uppercase;
+      backdrop-filter:blur(10px);
+    }
+    .touch-pad{
+      position:absolute;
+      left:50%;
+      bottom:var(--safe-bottom);
+      transform:translateX(-50%);
+      z-index:3;
+      display:none;
+      grid-template-columns:repeat(3, 72px);
+      gap:10px;
+      pointer-events:auto;
+    }
+    .touch-btn{
+      width:72px;
+      height:72px;
+      border-radius:16px;
+      border:1px solid rgba(0,255,216,.4);
+      background:rgba(8,17,24,0.7);
+      backdrop-filter:blur(6px);
+      color:rgba(232,247,255,.9);
+      font-size:18px;
+      font-weight:800;
+      text-transform:uppercase;
+    }
+    .panel{ display:none; }
+    .hud{ position:fixed; inset:0; pointer-events:none; display:flex; justify-content:center; z-index:3; }
+    .hint{
+      position:absolute;
+      bottom:10px;
+      color:rgba(232,247,255,.75);
+      font-size:12px;
+      text-align:center;
+      width:min(560px,92vw);
+      line-height:1.35;
+      padding:8px 10px;
+      background:rgba(0,0,0,0.28);
+      border:1px solid rgba(0,255,216,.18);
+      border-radius:10px;
+      backdrop-filter:blur(6px);
+    }
+    .badge{
+      display:inline-block;
+      padding:2px 8px;
+      border:1px solid rgba(0,255,216,.45);
+      border-radius:999px;
+      margin:0 4px;
+    }
+    .card{
+      padding:18px;
+      border-radius:22px;
+      border:1px solid rgba(0,255,216,.14);
+      background:var(--panel);
+      backdrop-filter:blur(12px);
+      box-shadow:0 18px 60px rgba(0,0,0,0.24);
+    }
+    .card h3{ margin:0 0 10px; font-size:13px; letter-spacing:.18em; text-transform:uppercase; color:rgba(0,255,216,.82); }
+    .card p{ margin:0; font-size:14px; line-height:1.58; color:var(--muted); }
+    .stats{ display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:10px; }
+    .stat{ padding:14px 14px 12px; border-radius:16px; background:rgba(255,244,228,0.03); border:1px solid rgba(255,224,183,0.06); }
+    .stat-label{ margin:0 0 8px; font-size:11px; text-transform:uppercase; letter-spacing:.18em; color:rgba(232,247,255,.54); }
+    .stat-value{ margin:0; font-size:28px; line-height:1; font-weight:800; color:var(--text); text-transform:uppercase; }
+    .stat-value.accent{ color:var(--accent); }
+    .stat-value.cyan{ color:var(--cyan); }
+    .list{ margin:0; padding:0; list-style:none; display:grid; gap:12px; }
+    .list li{ padding-left:18px; position:relative; font-size:14px; line-height:1.54; color:var(--muted); }
+    .list li::before{ content:""; position:absolute; left:0; top:.56em; width:7px; height:7px; border-radius:50%; background:var(--accent); box-shadow:0 0 0 5px rgba(0,255,216,.12); }
+    .note{ display:block; margin-top:12px; color:rgba(232,247,255,.52); font-size:12px; }
+    .score-modal{
+      position:fixed;
+      inset:0;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding:18px;
+      z-index:5;
+      background:rgba(2,7,10,0.6);
+      backdrop-filter:blur(8px);
+    }
+    .score-modal[hidden]{ display:none; }
+    .score-shell{
+      width:min(440px, 92vw);
+      max-height:min(760px, 92vh);
+      overflow:auto;
+      background:linear-gradient(180deg, rgba(11,22,28,0.95), rgba(5,12,16,0.96));
+      border:1px solid rgba(0,255,216,.28);
+      border-radius:22px;
+      box-shadow:0 18px 60px rgba(0,0,0,.42), 0 0 30px rgba(0,255,216,.08);
+      padding:22px 22px 18px;
+      color:var(--text);
+    }
+    .score-kicker{ margin:0 0 8px; font-size:11px; letter-spacing:.28em; text-transform:uppercase; color:rgba(0,255,216,.7); }
+    .score-title{ margin:0; font-size:34px; line-height:1; font-weight:800; letter-spacing:.04em; }
+    .score-subtitle{ margin:10px 0 0; color:rgba(232,247,255,.72); font-size:14px; line-height:1.45; }
+    .score-final{ display:flex; align-items:end; justify-content:space-between; gap:12px; margin:20px 0 14px; padding:14px 16px; border-radius:16px; background:rgba(255,255,255,.035); border:1px solid rgba(0,255,216,.14); }
+    .score-final-label{ margin:0; font-size:11px; letter-spacing:.24em; text-transform:uppercase; color:rgba(232,247,255,.62); }
+    .score-final-value{ margin:4px 0 0; font-size:38px; line-height:1; font-weight:800; color:var(--accent); }
+    .score-status{ font-size:12px; color:rgba(0,255,216,.76); text-align:right; }
+    .score-entry{ margin:0 0 18px; }
+    .score-entry[hidden]{ display:none; }
+    .score-entry-label{ display:block; font-size:12px; text-transform:uppercase; letter-spacing:.18em; color:rgba(232,247,255,.7); margin-bottom:10px; }
+    .score-entry-input{
+      width:100%;
+      box-sizing:border-box;
+      border-radius:14px;
+      border:1px solid rgba(0,255,216,.28);
+      background:rgba(2,10,13,.86);
+      color:var(--text);
+      padding:14px 16px;
+      font:700 28px/1.1 "Consolas","Courier New",monospace;
+      letter-spacing:.32em;
+      text-transform:uppercase;
+      outline:none;
+    }
+    .score-entry-input:focus{ border-color:rgba(0,255,216,.55); box-shadow:0 0 0 3px rgba(0,255,216,.12); }
+    .score-entry-hint{ margin:8px 0 0; font-size:12px; color:rgba(232,247,255,.56); }
+    .score-list-wrap{ margin-top:10px; }
+    .score-list-head{ display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:10px; }
+    .score-list-title{ margin:0; font-size:13px; letter-spacing:.16em; text-transform:uppercase; color:rgba(232,247,255,.72); }
+    .score-list-note{ font-size:12px; color:rgba(232,247,255,.5); }
+    .score-list{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:8px; }
+    .score-row{ display:grid; grid-template-columns:32px 1fr auto; align-items:center; gap:12px; padding:10px 12px; border-radius:14px; background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.05); font-family:"Consolas","Courier New",monospace; }
+    .score-row.is-pending{ border-color:rgba(255,184,77,.45); background:rgba(255,184,77,.08); }
+    .score-rank{ color:rgba(232,247,255,.54); font-size:12px; }
+    .score-name{ font-size:18px; letter-spacing:.18em; color:rgba(232,247,255,.92); }
+    .score-value{ font-size:17px; color:rgba(0,255,216,.88); }
+    .score-actions{ display:flex; flex-wrap:wrap; gap:10px; margin-top:18px; }
+    .score-action{ flex:1 1 150px; min-height:44px; border-radius:14px; border:1px solid rgba(0,255,216,.28); background:rgba(8,17,24,.76); color:var(--text); text-decoration:none; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; padding:0 14px; font-size:13px; font-weight:700; }
+    .score-action.primary{ background:linear-gradient(135deg, rgba(0,255,216,.18), rgba(0,255,216,.08)); }
+    .score-action:disabled{ opacity:.45; cursor:not-allowed; }
+    body[data-mode="playing"] .topbar{
+      opacity:0.84;
+    }
+    body[data-mode="playing"] .topbar:hover,
+    body[data-mode="playing"] .topbar:focus-within{
+      opacity:1;
+    }
+    .hint{
+      transition:opacity .2s ease, transform .2s ease;
+    }
+    body[data-mode="playing"] .hint{
+      opacity:0;
+      transform:translateY(10px);
+    }
+    body[data-mode="menu"] .hint,
+    body[data-mode="paused"] .hint,
+    body[data-mode="gameover"] .hint{
+      opacity:1;
+      transform:translateY(0);
+    }
+    @media (max-width: 980px){
+      .brand-logo{ width:104px; }
+      .subtitle{ display:none; }
+      .hint{ width:min(480px,90vw); }
+    }
+    @media (max-width: 760px){
+      .topbar{
+        justify-content:center;
+        left:var(--safe-left);
+        right:var(--safe-right);
+        padding:0;
+      }
+      .actions{
+        width:100%;
+        max-width:none;
+        flex-wrap:nowrap;
+        justify-content:flex-start;
+        overflow-x:auto;
+        gap:8px;
+        padding:0 0 4px;
+        -webkit-overflow-scrolling:touch;
+        scrollbar-width:none;
+        scroll-snap-type:x proximity;
+      }
+      .actions::-webkit-scrollbar{ display:none; }
+      .action{
+        flex:0 0 auto;
+        min-height:38px;
+        padding:0 10px;
+        font-size:11px;
+        scroll-snap-align:start;
+      }
+      .touch-pad{
+        display:grid;
+        grid-template-columns:repeat(3, minmax(58px, 18vw));
+        gap:8px;
+        bottom:calc(var(--safe-bottom) + 6px);
+      }
+      .touch-btn{
+        width:clamp(58px, 18vw, 72px);
+        height:clamp(58px, 18vw, 72px);
+      }
+      .hint{
+        bottom:94px;
+        width:min(92vw, 520px);
+      }
+    }
+    @media (max-width: 620px){
+      .hint{ display:none; }
+      .action{ min-height:36px; }
+    }
+    @media (max-width: 560px){ .score-title{ font-size:28px; } .score-final-value{ font-size:32px; } .score-entry-input{ font-size:24px; letter-spacing:.24em; } .score-row{ grid-template-columns:28px 1fr auto; gap:10px; } .score-name{ font-size:16px; letter-spacing:.12em; } .score-value{ font-size:15px; } .stats{ grid-template-columns:1fr 1fr; } }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="topbar">
+      <div class="brand">
+        <img class="brand-logo" src="assets/beaconrun.png" alt="Beacon Runner" />
+        <div>
+          <p class="eyebrow">Wasteland Mode</p>
+          <h1 class="title">Beacon Runner</h1>
+          <p class="subtitle">Crater fields, walls, pickups, weather, and a full-score run mode.</p>
+        </div>
+      </div>
+      <div class="actions">
+        <button id="startBtn" class="action primary" type="button">Start Run</button>
+        <button id="pauseBtn" class="action" type="button">Pause</button>
+        <button id="tutorialBtn" class="action" type="button">Tutorial</button>
+        <button id="hapticsBtn" class="action" type="button">Haptics: On</button>
+        <button id="difficultyBtn" class="action" type="button">Difficulty: Normal</button>
+        <a class="action" href="classic.html">Classic Mode</a>
+        <a class="action" href="scorecard.html">Scores</a>
+      </div>
+    </header>
+
+    <section class="layout">
+      <div class="stage">
+        <canvas id="runCanvas" width="1280" height="760" aria-label="Beacon Runner Wasteland mode"></canvas>
+        <div class="stage-overlay">
+          <div class="poster">
+            <h2>Run the wasteland for real.</h2>
+            <p>Push through broken roads, stone walls, crater fields, silhouettes, towers, wires, and shifting weather while the route pressure keeps rising.</p>
+          </div>
+          <div class="chip-row">
+            <span class="chip">Left / Right switch lanes</span>
+            <span class="chip">Up jumps floor breaks</span>
+            <span class="chip">Avoid stone walls by switching lanes</span>
+            <span class="chip">Enter starts, P pauses</span>
+          </div>
+        </div>
+        <div class="touch-pad" aria-hidden="true">
+          <button class="touch-btn" data-action="left" type="button">◀</button>
+          <button class="touch-btn" data-action="right" type="button">▶</button>
+          <button class="touch-btn" data-action="jump" type="button">⤒</button>
+        </div>
+      </div>
+
+      <aside class="panel">
+        <section class="card">
+          <h3>Run Readout</h3>
+          <div class="stats">
+            <div class="stat">
+              <p class="stat-label">Mode</p>
+              <p id="modeLabel" class="stat-value cyan">Menu</p>
+            </div>
+            <div class="stat">
+              <p class="stat-label">Score</p>
+              <p id="scoreLabel" class="stat-value accent">0</p>
+            </div>
+            <div class="stat">
+              <p class="stat-label">Best</p>
+              <p id="bestLabel" class="stat-value">0</p>
+            </div>
+            <div class="stat">
+              <p class="stat-label">Lives</p>
+              <p id="livesLabel" class="stat-value">3</p>
+            </div>
+            <div class="stat">
+              <p class="stat-label">Weather</p>
+              <p id="weatherLabel" class="stat-value">Clear</p>
+            </div>
+            <div class="stat">
+              <p class="stat-label">Time</p>
+              <p id="timeLabel" class="stat-value">Day</p>
+            </div>
+            <div class="stat">
+              <p class="stat-label">Segment</p>
+              <p id="segmentLabel" class="stat-value">Dust Run</p>
+            </div>
+            <div class="stat">
+              <p class="stat-label">Runner State</p>
+              <p id="actionLabel" class="stat-value">Idle</p>
+            </div>
+            <div class="stat">
+              <p class="stat-label">Coins</p>
+              <p id="coinsLabel" class="stat-value accent">0</p>
+            </div>
+            <div class="stat">
+              <p class="stat-label">Beacons</p>
+              <p id="beaconsLabel" class="stat-value cyan">0</p>
+            </div>
+            <div class="stat">
+              <p class="stat-label">Clears</p>
+              <p id="passedLabel" class="stat-value">0</p>
+            </div>
+            <div class="stat">
+              <p class="stat-label">Power State</p>
+              <p id="powerLabel" class="stat-value">None</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="card">
+          <h3>Hazards And Loot</h3>
+          <ul class="list">
+            <li>Crater breaks and floor holes must be jumped cleanly.</li>
+            <li>Stone walls choke a lane and force a fast switch.</li>
+            <li>Coin lines, beacons, shield, magnet, and boost create the arcade chase layer.</li>
+            <li>Fake-outs, jackpot routes, and denser hazard chains keep the run from repeating the same way twice.</li>
+          </ul>
+        </section>
+
+        <section class="card">
+          <h3>Route Atmosphere</h3>
+          <p>Weather shifts over time, the light rolls from day to dusk to night, and roadside silhouettes plus comms towers frame the road so the run feels placed in a world instead of floating on a test strip.</p>
+          <span class="note">The classic game remains available separately, while this mode carries the wasteland route as a full play experience.</span>
+        </section>
+      </aside>
+    </section>
+  </main>
+
+  <div class="hud">
+    <div class="hint">
+      <span class="badge">←/→</span> move lanes &nbsp;
+      <span class="badge">↑</span> jump hazards &nbsp;
+      <span class="badge">Enter</span> start &nbsp;
+      <span class="badge">P</span> pause
+    </div>
+  </div>
+
+  <div id="scoreModal" class="score-modal" hidden>
+    <section class="score-shell" aria-labelledby="scoreModalTitle">
+      <p class="score-kicker">Run Complete</p>
+      <h2 id="scoreModalTitle" class="score-title">Scorecard</h2>
+      <p id="scoreModalSubtitle" class="score-subtitle">Save the run if it made the board, or jump right back into the dust.</p>
+      <div class="score-final">
+        <div>
+          <p class="score-final-label">Final Score</p>
+          <p id="scoreModalScore" class="score-final-value">0</p>
+        </div>
+        <div id="scoreModalStatus" class="score-status">Top 10 ready</div>
+      </div>
+      <div id="scoreEntrySection" class="score-entry" hidden>
+        <label class="score-entry-label" for="scoreNameInput">Enter your name</label>
+        <input id="scoreNameInput" class="score-entry-input" type="text" inputmode="text" maxlength="6" autocomplete="off" spellcheck="false" placeholder="______" />
+        <p id="scoreEntryHint" class="score-entry-hint">Use up to 6 letters. The board updates live while you type.</p>
+      </div>
+      <div class="score-list-wrap">
+        <div class="score-list-head">
+          <h3 class="score-list-title">Top 10 Runs</h3>
+          <span id="scoreListNote" class="score-list-note">Local machine</span>
+        </div>
+        <ol id="scoreList" class="score-list"></ol>
+      </div>
+      <div class="score-actions">
+        <button id="saveScoreBtn" class="score-action primary" type="button">Save Score</button>
+        <button id="retryBtn" class="score-action" type="button">Play Again</button>
+        <a class="score-action" href="scorecard.html">Open Scorecard Page</a>
+      </div>
+    </section>
+  </div>
+
+  <script src="score-utils.js"></script>
+  <script src="dom-utils.js"></script>
+  <script src="wasteland-run.js"></script>
+</body>
+</html>

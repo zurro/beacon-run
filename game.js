@@ -1,39 +1,85 @@
 (() => {
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
+  const domApi = window.BeaconRunDom;
 
   const W = 480, H = 800;
   const LANES = [120, 240, 360];
+  const PLAYER_GROUND_Y = 640;
+  const OFFSCREEN_Y = H + 300;
+  const CLEANUP_Y = H + 260;
+  const OBSTACLE_MIN_GAP = 220;
+  const TOAST_DURATION = 2.6;
+  const STARTING_LIVES = 3;
+  const HIT_INVULN = 1.35;
+  const LIFE_LOST_ICON_DURATION = 0.55;
+  const scoresApi = window.BeaconRunScores;
 
-  const storedTouchButtons = localStorage.getItem('beacon_runner_touch_buttons');
+  const STORAGE_KEYS = {
+    mute: 'beacon_runner_mute',
+    haptics: 'beacon_runner_haptics',
+    fps: 'beacon_runner_fps',
+    touchButtons: 'beacon_runner_touch_buttons',
+    totalCoins: 'beacon_runner_total_coins',
+    totalBeacons: 'beacon_runner_total_beacons',
+    totalJumps: 'beacon_runner_total_jumps',
+    totalRuns: 'beacon_runner_total_runs',
+    achievements: 'beacon_runner_achievements',
+    best: 'beacon_runner_best',
+    tutorialDone: 'beacon_runner_tutorial_done'
+  };
+
+  const POWERUP_TIMINGS = {
+    shield: 6.0,
+    magnet: 6.0,
+    boost: 4.5
+  };
+
+  const POWERUP_VISUALS = {
+    shield: { assetKey: 'shield', glow: 'rgba(0,255,216,0.28)', burst: '#00ffd8', label: 'SHIELD' },
+    magnet: { assetKey: 'magnet', glow: 'rgba(255,184,77,0.25)', burst: '#ffb84d', label: 'MAGNET' },
+    boost: { assetKey: 'boost', glow: 'rgba(123,92,255,0.24)', burst: '#7b5cff', label: 'BOOST' },
+    coin: { assetKey: 'coin', glow: 'rgba(255,215,64,0.25)', burst: '#ffd84d', label: 'COIN' },
+    beacon: { assetKey: 'beacon', glow: 'rgba(122,252,255,0.24)', burst: '#7afcff', label: 'BEACON' },
+    fallback: { assetKey: 'power', glow: 'rgba(255,215,64,0.25)', burst: '#ffd84d', label: 'POWER' }
+  };
+
+  const HUD_BARS = [
+    { label: 'SHIELD', key: 'shield', max: POWERUP_TIMINGS.shield, color: 'rgba(0,255,216,0.75)', x: 290, y: 28 },
+    { label: 'MAGNET', key: 'magnet', max: POWERUP_TIMINGS.magnet, color: 'rgba(255,184,77,0.75)', x: 290, y: 52 },
+    { label: 'BOOST', key: 'boost', max: POWERUP_TIMINGS.boost, color: 'rgba(123,92,255,0.75)', x: 290, y: 76 }
+  ];
+
+  const OBSTACLE_VARIANT_KEYS = {
+    high: ['high1', 'high2', 'high3'],
+    low: ['low1', 'low2', 'low3']
+  };
+
+  const storedTouchButtons = localStorage.getItem(STORAGE_KEYS.touchButtons);
   const settings = {
-    muted: localStorage.getItem('beacon_runner_mute') === '1',
-    haptics: localStorage.getItem('beacon_runner_haptics') !== '0',
-    fpsLimit: Number(localStorage.getItem('beacon_runner_fps') || '60'),
-    reducedMotion: window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+    muted: localStorage.getItem(STORAGE_KEYS.mute) === '1',
+    haptics: localStorage.getItem(STORAGE_KEYS.haptics) !== '0',
+    fpsLimit: Number(localStorage.getItem(STORAGE_KEYS.fps) || '60'),
     touchButtons: storedTouchButtons === null ? false : storedTouchButtons !== '0'
   };
 
-  if(window.matchMedia){
-    const media = window.matchMedia('(prefers-reduced-motion: reduce)');
-    if(media && typeof media.addEventListener === 'function'){
-      media.addEventListener('change', (e)=>{ settings.reducedMotion = e.matches; });
-    } else if(media && typeof media.addListener === 'function'){
-      media.addListener((e)=>{ settings.reducedMotion = e.matches; });
-    }
-  }
-
   const totals = {
-    coins: Number(localStorage.getItem('beacon_runner_total_coins') || '0'),
-    beacons: Number(localStorage.getItem('beacon_runner_total_beacons') || '0'),
-    jumps: Number(localStorage.getItem('beacon_runner_total_jumps') || '0'),
-    runs: Number(localStorage.getItem('beacon_runner_total_runs') || '0')
+    coins: Number(localStorage.getItem(STORAGE_KEYS.totalCoins) || '0'),
+    beacons: Number(localStorage.getItem(STORAGE_KEYS.totalBeacons) || '0'),
+    jumps: Number(localStorage.getItem(STORAGE_KEYS.totalJumps) || '0'),
+    runs: Number(localStorage.getItem(STORAGE_KEYS.totalRuns) || '0')
   };
 
-  const unlocked = new Set(JSON.parse(localStorage.getItem('beacon_runner_achievements') || '[]'));
+  const unlocked = new Set(JSON.parse(localStorage.getItem(STORAGE_KEYS.achievements) || '[]'));
 
   // HiDPI
+  function syncViewportCss() {
+    const height = Math.max(1, Math.round(window.visualViewport ? window.visualViewport.height : window.innerHeight));
+    document.documentElement.style.setProperty('--app-height', height + 'px');
+  }
+
   function fitDPI() {
+    syncViewportCss();
     const parent = canvas.parentElement;
     const maxW = parent ? parent.clientWidth : window.innerWidth;
     const maxH = parent ? parent.clientHeight : window.innerHeight;
@@ -54,27 +100,32 @@
     ctx.setTransform(scale,0,0,scale,0,0);
   }
   window.addEventListener('resize', fitDPI);
+  if(window.visualViewport){
+    window.visualViewport.addEventListener('resize', fitDPI);
+    window.visualViewport.addEventListener('scroll', fitDPI);
+  }
   fitDPI();
 
   const state = {
     mode: 'loading', // loading | menu | playing | paused | gameover
     t: 0,
     score: 0,
-    best: Number(localStorage.getItem('beacon_runner_best')||0),
+    best: Number(localStorage.getItem(STORAGE_KEYS.best)||0),
     speed: 520,            // px/sec scrolling
     spawnTimer: 0,
     spawnInterval: 0.95,
     powerTimer: 0,
     beaconTimer: 0,
     coinTrailTimer: 0,
-    difficultyTimer: 0,
+    lives: STARTING_LIVES,
     shield: 0,
     magnet: 0,
     boost: 0,
+    lifeLostIcon: 0,
     loadingProgress: 0,
     toast: { text: '', t: 0 },
     tutorial: {
-      active: localStorage.getItem('beacon_runner_tutorial_done') !== '1',
+      active: localStorage.getItem(STORAGE_KEYS.tutorialDone) !== '1',
       step: 0,
       jump: false,
       slide: false,
@@ -88,7 +139,11 @@
       passed: 0,
       powerups: 0
     },
-    quests: []
+    quests: [],
+    scorecard: {
+      name: '',
+      finalScore: 0
+    }
   };
 
   const loading = { total: 0, loaded: 0, failed: 0 };
@@ -136,30 +191,154 @@
 
   const rng = (a,b)=> a + Math.random()*(b-a);
   const clamp=(v,a,b)=> Math.max(a, Math.min(b,v));
+  const playerBounds = { x: 0, y: 0, w: 0, h: 0 };
+  const scoreEntryState = { visible: false, qualifies: false, saved: false };
+  let lastScoreModalSnapshot = '';
+
+  function randomIndex(size){
+    return (Math.random() * size) | 0;
+  }
+
+  function randomLane(){
+    return randomIndex(LANES.length);
+  }
+
+  function getPlayerBounds(){
+    playerBounds.w = player.w;
+    playerBounds.h = player.h;
+    playerBounds.x = player.x - playerBounds.w / 2;
+    playerBounds.y = player.y - playerBounds.h / 2;
+    return playerBounds;
+  }
+
+  function markForRemoval(entity){
+    entity.y = OFFSCREEN_Y;
+  }
+
+  function removeOffscreen(items){
+    for(let i = items.length - 1; i >= 0; i--){
+      if(items[i].y > CLEANUP_Y) items.splice(i, 1);
+    }
+  }
+
+  function getPowerupVisual(kind){
+    return POWERUP_VISUALS[kind] || POWERUP_VISUALS.fallback;
+  }
+
+  function getPowerupLabel(powerup){
+    if(powerup.kind === 'coin') return '+' + (powerup.value || 100);
+    return getPowerupVisual(powerup.kind).label;
+  }
+
+  function getObstacleAsset(obstacle){
+    const variants = OBSTACLE_VARIANT_KEYS[obstacle.type];
+    return (variants && ASSETS[variants[obstacle.variant]]) || ASSETS[obstacle.type];
+  }
+
+  function drawFittedImage(img, x, y, maxW, maxH){
+    const aspect = img.width / img.height;
+    let drawW = maxW;
+    let drawH = Math.max(1, Math.round(drawW / aspect));
+    if(drawH > maxH){
+      drawH = maxH;
+      drawW = Math.max(1, Math.round(drawH * aspect));
+    }
+    ctx.drawImage(img, x - drawW / 2, y, drawW, drawH);
+    return drawH;
+  }
+
+  function drawHudBar(x, y, label, value, maxValue, color){
+    ctx.fillStyle='rgba(232,247,255,0.55)';
+    ctx.font='700 12px system-ui';
+    ctx.fillText(label, x, y);
+    ctx.fillStyle='rgba(255,255,255,0.15)';
+    ctx.fillRect(x + 54, y - 10, 110, 10);
+    ctx.fillStyle=color;
+    ctx.fillRect(x + 54, y - 10, 110 * clamp(value / maxValue, 0, 1), 10);
+  }
+
+  function getTutorialTip(){
+    if(state.tutorial.step === 1) return 'Swipe down or press ↓ to slide.';
+    if(state.tutorial.step === 2) return 'Grab any power-up.';
+    return 'Swipe up or press ↑ to jump.';
+  }
+
+  function sanitizeArcadeName(name){
+    return scoresApi ? scoresApi.sanitizeName(name) : String(name || '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 6);
+  }
+
+  function formatArcadeName(name){
+    return scoresApi ? scoresApi.formatName(name) : sanitizeArcadeName(name);
+  }
+
+  function loadScoreboard(){
+    return scoresApi ? scoresApi.load() : [];
+  }
+
+  function scoreQualifies(score){
+    const scores = loadScoreboard();
+    return scoresApi ? scoresApi.qualifies(scores, score) : scores.length < 10;
+  }
+
+  function collectPowerup(powerup){
+    if(powerup.kind === 'shield'){
+      state.shield = POWERUP_TIMINGS.shield;
+      state.score += 35;
+    }
+    if(powerup.kind === 'magnet'){
+      state.magnet = POWERUP_TIMINGS.magnet;
+      state.score += 35;
+    }
+    if(powerup.kind === 'boost'){
+      state.boost = POWERUP_TIMINGS.boost;
+      state.score += 35;
+    }
+    if(powerup.kind === 'coin'){
+      state.score += (powerup.value || 100);
+      state.run.coins++;
+      totals.coins++;
+      saveTotals();
+      if(totals.coins >= 50) unlockAchievement('coins_50', 'Coin Collector');
+    }
+    if(powerup.kind === 'beacon'){
+      state.score += (powerup.value || 200);
+      state.run.beacons++;
+      totals.beacons++;
+      saveTotals();
+      if(totals.beacons >= 10) unlockAchievement('beacon_10', 'Beacon Hunter');
+    }
+
+    state.run.powerups++;
+    playSound('pickup');
+    vibrate(12);
+    if(state.tutorial.active) state.tutorial.power = true;
+    burst(powerup.x, powerup.y, getPowerupVisual(powerup.kind).burst);
+    markForRemoval(powerup);
+  }
 
   // Grain disabled for smoother motion
 
   function saveSettings(){
-    localStorage.setItem('beacon_runner_mute', settings.muted ? '1' : '0');
-    localStorage.setItem('beacon_runner_haptics', settings.haptics ? '1' : '0');
-    localStorage.setItem('beacon_runner_fps', String(settings.fpsLimit));
-    localStorage.setItem('beacon_runner_touch_buttons', settings.touchButtons ? '1' : '0');
+    localStorage.setItem(STORAGE_KEYS.mute, settings.muted ? '1' : '0');
+    localStorage.setItem(STORAGE_KEYS.haptics, settings.haptics ? '1' : '0');
+    localStorage.setItem(STORAGE_KEYS.fps, String(settings.fpsLimit));
+    localStorage.setItem(STORAGE_KEYS.touchButtons, settings.touchButtons ? '1' : '0');
   }
 
   function saveTotals(){
-    localStorage.setItem('beacon_runner_total_coins', String(totals.coins));
-    localStorage.setItem('beacon_runner_total_beacons', String(totals.beacons));
-    localStorage.setItem('beacon_runner_total_jumps', String(totals.jumps));
-    localStorage.setItem('beacon_runner_total_runs', String(totals.runs));
+    localStorage.setItem(STORAGE_KEYS.totalCoins, String(totals.coins));
+    localStorage.setItem(STORAGE_KEYS.totalBeacons, String(totals.beacons));
+    localStorage.setItem(STORAGE_KEYS.totalJumps, String(totals.jumps));
+    localStorage.setItem(STORAGE_KEYS.totalRuns, String(totals.runs));
   }
 
   function saveAchievements(){
-    localStorage.setItem('beacon_runner_achievements', JSON.stringify([...unlocked]));
+    localStorage.setItem(STORAGE_KEYS.achievements, JSON.stringify([...unlocked]));
   }
 
   function toast(text){
     state.toast.text = text;
-    state.toast.t = 2.6;
+    state.toast.t = TOAST_DURATION;
   }
 
   function unlockAchievement(id, label){
@@ -218,7 +397,7 @@
   const player = {
     lane: 1,
     x: LANES[1],
-    y: 640,
+    y: PLAYER_GROUND_Y,
     w: 72,
     h: 110,
     vy: 0,
@@ -234,10 +413,10 @@
   const powerups = [];
   const particles = [];
 
-  // Input
-  const input = { left:false, right:false, up:false, down:false, pause:false };
-
   document.addEventListener('keydown', e => {
+    const typingInName = e.target === scoreNameInput;
+    if(typingInName && e.key !== 'Enter') return;
+
     ensureAudio();
     if(e.key==='ArrowLeft') onLane(-1);
     if(e.key==='ArrowRight') onLane(+1);
@@ -289,6 +468,142 @@
   const hapticsBtn = document.getElementById('hapticsBtn');
   const fpsBtn = document.getElementById('fpsBtn');
   const touchBtn = document.getElementById('touchBtn');
+  const scoreModal = document.getElementById('scoreModal');
+  const scoreModalScore = document.getElementById('scoreModalScore');
+  const scoreModalStatus = document.getElementById('scoreModalStatus');
+  const scoreModalSubtitle = document.getElementById('scoreModalSubtitle');
+  const scoreEntrySection = document.getElementById('scoreEntrySection');
+  const scoreNameInput = document.getElementById('scoreNameInput');
+  const scoreEntryHint = document.getElementById('scoreEntryHint');
+  const scoreList = document.getElementById('scoreList');
+  const scoreListNote = document.getElementById('scoreListNote');
+  const saveScoreBtn = document.getElementById('saveScoreBtn');
+  const retryBtn = document.getElementById('retryBtn');
+
+  function buildScoreRow(className, rankText, nameText, scoreText){
+    return domApi.el('li', {
+      className,
+      children: [
+        domApi.el('span', { className: 'score-rank', text: rankText }),
+        domApi.el('span', { className: 'score-name', text: nameText }),
+        domApi.el('span', { className: 'score-value', text: scoreText })
+      ]
+    });
+  }
+
+  function renderScoreRows(scores, pendingName){
+    if(!scoreList) return;
+    const rows = scores.length ? scores : [{ name: '------', score: 0, pending: false }];
+    const fragment = document.createDocumentFragment();
+    rows.forEach((entry, index) => {
+      const name = entry.score > 0 || entry.name ? formatArcadeName(entry.name || pendingName || '') : '------';
+      const pendingClass = entry.pending ? ' is-pending' : '';
+      fragment.appendChild(buildScoreRow(
+        'score-row' + pendingClass,
+        '#' + String(index + 1).padStart(2, '0'),
+        name,
+        String(entry.score)
+      ));
+    });
+    domApi.replace(scoreList, [fragment]);
+  }
+
+  function getScorePreview(){
+    const scores = loadScoreboard();
+    const finalScore = Math.floor(state.scorecard.finalScore || state.score);
+    if(scoreEntryState.qualifies && !scoreEntryState.saved){
+      const previewName = sanitizeArcadeName(state.scorecard.name);
+      const candidate = { name: previewName, score: finalScore, createdAt: Date.now(), pending: true };
+      return (scoresApi ? scoresApi.withCandidate(scores, candidate) : scores).map(entry => ({
+        name: entry.name,
+        score: entry.score,
+        pending: entry.createdAt === candidate.createdAt
+      }));
+    }
+    return scores;
+  }
+
+  function getScoreModalSnapshot(){
+    return JSON.stringify({
+      scores: getScorePreview(),
+      qualifies: scoreEntryState.qualifies,
+      saved: scoreEntryState.saved,
+      finalScore: Math.floor(state.scorecard.finalScore || state.score),
+      name: sanitizeArcadeName(state.scorecard.name)
+    });
+  }
+
+  function updateScoreEntryUi(){
+    const snapshot = getScoreModalSnapshot();
+    if(snapshot === lastScoreModalSnapshot) return;
+    lastScoreModalSnapshot = snapshot;
+
+    const finalScore = Math.floor(state.scorecard.finalScore || state.score);
+    const cleanName = sanitizeArcadeName(state.scorecard.name);
+    const canSave = scoreEntryState.qualifies && !scoreEntryState.saved && cleanName.length > 0;
+
+    if(scoreModalScore) scoreModalScore.textContent = String(finalScore);
+    if(scoreEntrySection) scoreEntrySection.hidden = !scoreEntryState.qualifies || scoreEntryState.saved;
+    if(saveScoreBtn){
+      saveScoreBtn.hidden = !scoreEntryState.qualifies && !scoreEntryState.saved;
+      saveScoreBtn.disabled = !canSave;
+      saveScoreBtn.textContent = scoreEntryState.saved ? 'Saved to Top 10' : 'Save Score';
+    }
+    if(scoreModalStatus){
+      if(scoreEntryState.saved) scoreModalStatus.textContent = 'Saved to the local top 10';
+      else if(scoreEntryState.qualifies) scoreModalStatus.textContent = 'New high score candidate';
+      else scoreModalStatus.textContent = 'Top 10 unchanged';
+    }
+    if(scoreModalSubtitle){
+      scoreModalSubtitle.textContent = scoreEntryState.qualifies
+        ? 'You made the board. Enter your name and lock the run in.'
+        : 'This run did not reach the top 10 yet, but the leaderboard is right here.';
+    }
+    if(scoreEntryHint){
+      scoreEntryHint.textContent = scoreEntryState.saved
+        ? 'Saved. You can replay immediately or open the full scorecard page.'
+        : 'Use up to 6 letters. The board updates live while you type.';
+    }
+    if(scoreListNote){
+      scoreListNote.textContent = scoreEntryState.qualifies ? 'Preview updates live' : 'Local machine';
+    }
+    renderScoreRows(getScorePreview(), cleanName);
+  }
+
+  function hideScoreModal(){
+    scoreEntryState.visible = false;
+    lastScoreModalSnapshot = '';
+    if(scoreModal) scoreModal.hidden = true;
+  }
+
+  function openScoreModal(){
+    scoreEntryState.visible = true;
+    lastScoreModalSnapshot = '';
+    if(scoreModal) scoreModal.hidden = false;
+    if(scoreNameInput) scoreNameInput.value = state.scorecard.name;
+    updateScoreEntryUi();
+    if(scoreEntryState.qualifies && !scoreEntryState.saved && scoreNameInput){
+      scoreNameInput.focus();
+      scoreNameInput.select();
+    }
+  }
+
+  function saveScoreEntry(){
+    if(!scoreEntryState.qualifies || scoreEntryState.saved) return;
+    const finalName = sanitizeArcadeName(state.scorecard.name);
+    if(finalName.length < 1){
+      toast('Enter a name to save');
+      return;
+    }
+    if(scoresApi){
+      scoresApi.insert({ name: finalName, score: Math.floor(state.scorecard.finalScore), createdAt: Date.now() });
+    }
+    scoreEntryState.saved = true;
+    state.scorecard.name = finalName;
+    if(scoreNameInput) scoreNameInput.value = finalName;
+    toast('Score saved for ' + finalName);
+    updateScoreEntryUi();
+  }
 
   function applyTouchButtons(){
     document.body.classList.toggle('show-touch', settings.touchButtons);
@@ -339,10 +654,50 @@
     });
   }
 
+  if(scoreNameInput){
+    scoreNameInput.addEventListener('input', ()=>{
+      const cleanName = sanitizeArcadeName(scoreNameInput.value);
+      scoreNameInput.value = cleanName;
+      state.scorecard.name = cleanName;
+      updateScoreEntryUi();
+    });
+  }
+
+  if(saveScoreBtn){
+    saveScoreBtn.addEventListener('click', saveScoreEntry);
+  }
+
+  if(retryBtn){
+    retryBtn.addEventListener('click', ()=>{
+      hideScoreModal();
+      startGame();
+    });
+  }
+
+  function refreshScoreModalIfVisible(){
+    if(scoreEntryState.visible) updateScoreEntryUi();
+  }
+
+  if(scoresApi){
+    window.addEventListener('storage', (event) => {
+      if(event.key === scoresApi.STORAGE_KEY) refreshScoreModalIfVisible();
+    });
+    window.setInterval(refreshScoreModalIfVisible, 5000);
+  }
+
   applyTouchButtons();
   updateToggleLabels();
 
   function onEnter(){
+    if(state.mode==='gameover' && scoreEntryState.visible){
+      if(scoreEntryState.qualifies && !scoreEntryState.saved){
+        saveScoreEntry();
+        return;
+      }
+      hideScoreModal();
+      startGame();
+      return;
+    }
     if(state.mode==='menu' || state.mode==='gameover') startGame();
   }
 
@@ -384,6 +739,13 @@
   }
 
   function startGame(){
+    hideScoreModal();
+    scoreEntryState.qualifies = false;
+    scoreEntryState.saved = false;
+    state.scorecard.name = '';
+    state.scorecard.finalScore = 0;
+    if(scoreNameInput) scoreNameInput.value = '';
+
     state.mode='playing';
     state.t=0;
     state.score=0;
@@ -393,10 +755,11 @@
     state.powerTimer=0;
     state.beaconTimer=0;
     state.coinTrailTimer=0;
-    state.difficultyTimer=0;
+    state.lives=STARTING_LIVES;
     state.shield=0;
     state.magnet=0;
     state.boost=0;
+    state.lifeLostIcon=0;
 
     totals.runs++;
     saveTotals();
@@ -417,7 +780,7 @@
 
     player.lane=1;
     player.x=LANES[1];
-    player.y=640;
+    player.y=PLAYER_GROUND_Y;
     player.vy=0;
     player.grounded=true;
     player.slide=0;
@@ -426,13 +789,33 @@
     player.frame=0;
   }
 
+  function loseLife(obstacle){
+    state.lives--;
+    state.lifeLostIcon = LIFE_LOST_ICON_DURATION;
+    player.invuln = HIT_INVULN;
+    player.vy = 0;
+    player.y = PLAYER_GROUND_Y;
+    player.grounded = true;
+    player.slide = 0;
+    if(obstacle) markForRemoval(obstacle);
+    burst(player.x, player.y, '#ff7a7a');
+    playSound('hit');
+    vibrate([20, 20, 20]);
+    toast('Life lost - ' + state.lives + ' left');
+  }
+
   function gameOver(){
     state.mode='gameover';
     state.best = Math.max(state.best, Math.floor(state.score));
-    localStorage.setItem('beacon_runner_best', String(state.best));
+    localStorage.setItem(STORAGE_KEYS.best, String(state.best));
+    state.scorecard.finalScore = Math.floor(state.score);
+    state.scorecard.name = '';
+    scoreEntryState.qualifies = scoreQualifies(state.scorecard.finalScore);
+    scoreEntryState.saved = false;
     playSound('gameover');
     vibrate([40,30,40]);
     if(state.score >= 2000) unlockAchievement('score_2000', 'Score 2000');
+    openScoreModal();
   }
 
   const questTemplates = [
@@ -457,7 +840,8 @@
 
   // Particles
   function burst(x,y,color){
-    for(let i=0;i<14;i++){
+    const count = 14;
+    for(let i=0;i<count;i++){
       particles.push({x,y, vx:rng(-180,180), vy:rng(-240,40), life:rng(0.25,0.5), color});
     }
   }
@@ -480,17 +864,16 @@
     const h = 108;
     const drawW = w;
     const drawH = h;
-    const variant = ((Math.random()*3)|0);
-    const minGap = 220;
+    const variant = randomIndex(3);
 
     // Try to find a lane that isn't already occupied too close
-    let lane = (Math.random()*3)|0;
+    let lane = randomLane();
     let tries = 0;
-    while(tries < 3 && !laneClearForObstacle(lane, minGap)){
-      lane = (Math.random()*3)|0;
+    while(tries < 3 && !laneClearForObstacle(lane, OBSTACLE_MIN_GAP)){
+      lane = randomLane();
       tries++;
     }
-    if(!laneClearForObstacle(lane, minGap)) return;
+    if(!laneClearForObstacle(lane, OBSTACLE_MIN_GAP)) return;
     obstacles.push({
       lane,
       x: LANES[lane],
@@ -506,26 +889,25 @@
   }
 
   function spawnPower(){
-    const lane = (Math.random()*3)|0;
+    const lane = randomLane();
     const roll = Math.random();
     let kind = 'shield';
-    let value = 0;
     if(roll < 0.30) kind = 'shield';
     else if(roll < 0.60) kind = 'magnet';
     else if(roll < 0.80) kind = 'boost';
     else kind = 'shield';
-    powerups.push({ lane, x:LANES[lane], y:-120, kind, value, w:70, h:70, spin:rng(0,Math.PI*2)});
+    powerups.push({ lane, x:LANES[lane], y:-120, kind, w:70, h:70, spin:rng(0,Math.PI*2)});
   }
 
   function spawnBeacon(){
-    const lane = (Math.random()*3)|0;
+    const lane = randomLane();
     powerups.push({ lane, x:LANES[lane], y:-120, kind:'beacon', value: 500, w:70, h:70, spin:rng(0,Math.PI*2)});
   }
 
   function spawnCoinTrail(){
     const length = (Math.random()*3|0) + 5; // 5-7 coins
     const spacing = 90;
-    let lane = (Math.random()*3)|0;
+    let lane = randomLane();
     const zigzag = Math.random() < 0.55;
     for(let i=0;i<length;i++){
       powerups.push({
@@ -547,14 +929,6 @@
   // Collision helpers
   function aabb(ax,ay,aw,ah, bx,by,bw,bh){
     return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
-  }
-
-  function playerBox(){
-    const w = player.w;
-    const h = player.h;
-    const x = player.x - w/2;
-    const y = player.y - h/2;
-    return {x,y,w,h};
   }
 
   // Main loop timing
@@ -591,31 +965,34 @@
   function update(dt){
     state.t += dt;
     const ramp = clamp(state.t / 85, 0, 1);
-    state.speed = 520 + 460 * ramp;
+    const baseSpeed = 520 + 460 * ramp;
+    state.speed = baseSpeed;
     state.spawnInterval = 0.95 - 0.40 * ramp;
-    const effSpeed = state.speed * (state.boost>0 ? 1.35 : 1);
+    const effSpeed = state.speed * (state.boost > 0 ? 1.35 : 1);
     state.score += dt * (10 + effSpeed/110);
 
     // Timed toast
     if(state.toast.t > 0) state.toast.t -= dt;
+    if(state.lifeLostIcon > 0) state.lifeLostIcon -= dt;
 
     // Background scroll (match world speed for consistent motion)
-    const dy = (effSpeed * dt);
+    const dy = effSpeed * dt;
     const bgImg = ASSETS.bg;
     const bgHeight = (bgImg && bgImg.complete && bgImg.height) ? bgImg.height : H;
     bg.y -= dy;
-    if(bg.y >= bgHeight) bg.y -= bgHeight;
+    if(bg.y <= -bgHeight) bg.y += bgHeight;
 
     // Player lane easing
     const targetX = LANES[player.lane];
-    player.x += (targetX - player.x) * (1 - Math.pow(0.001, dt));
+    const laneEase = 1 - Math.pow(0.001, dt);
+    player.x += (targetX - player.x) * laneEase;
 
     // Jump physics
     if(!player.grounded){
       player.vy += 1550 * dt;
       player.y += player.vy * dt;
-      if(player.y >= 640){
-        player.y = 640;
+      if(player.y >= PLAYER_GROUND_Y){
+        player.y = PLAYER_GROUND_Y;
         player.vy = 0;
         player.grounded = true;
       }
@@ -676,10 +1053,11 @@
     }
 
     // Move powerups
+    const magnetActive = state.magnet > 0;
     for(const p of powerups){
       p.y += dy;
-      p.spin += dt*3;
-      if(state.magnet>0){
+      p.spin += dt * 3;
+      if(magnetActive){
         // gentle pull toward player when nearby
         const dx = player.x - p.x;
         const dy2 = player.y - p.y;
@@ -700,7 +1078,7 @@
     }
 
     // Collisions
-    const pb = playerBox();
+    const pb = getPlayerBounds();
 
     // Obstacles collision with avoidance rules
     for(const o of obstacles){
@@ -726,13 +1104,16 @@
           burst(o.x,o.y,'#00ffd8');
           playSound('hit');
           vibrate(18);
-          o.y = H+300;
+          markForRemoval(o);
           continue;
         }
         // extra grace window
         if(player.invuln<=0){
+          if(state.lives > 1){
+            loseLife(o);
+            continue;
+          }
           burst(player.x, player.y, '#ff3b6b');
-          playSound('hit');
           gameOver();
           return;
         }
@@ -746,46 +1127,7 @@
     for(const p of powerups){
       const px=p.x-p.w/2, py=p.y-p.h/2;
       if(aabb(pb.x,pb.y,pb.w,pb.h, px,py,p.w,p.h)){
-        if(p.kind==='shield'){
-          state.shield = 6.0;
-          state.score += 35;
-        }
-        if(p.kind==='magnet'){
-          state.magnet = 6.0;
-          state.score += 35;
-        }
-        if(p.kind==='boost'){
-          state.boost = 4.5;
-          state.score += 35;
-        }
-        if(p.kind==='coin'){
-          state.score += (p.value || 100);
-          state.run.coins++;
-          totals.coins++;
-          saveTotals();
-          if(totals.coins >= 50) unlockAchievement('coins_50', 'Coin Collector');
-        }
-        if(p.kind==='beacon'){
-          state.score += (p.value || 200);
-          state.run.beacons++;
-          totals.beacons++;
-          saveTotals();
-          if(totals.beacons >= 10) unlockAchievement('beacon_10', 'Beacon Hunter');
-        }
-        state.run.powerups++;
-        playSound('pickup');
-        vibrate(12);
-        if(state.tutorial.active) state.tutorial.power = true;
-        burst(
-          p.x,
-          p.y,
-          p.kind==='shield' ? '#00ffd8' :
-          p.kind==='magnet' ? '#ffb84d' :
-          p.kind==='boost' ? '#7b5cff' :
-          p.kind==='beacon' ? '#7afcff' :
-          '#ffd84d'
-        );
-        p.y = H+300;
+        collectPowerup(p);
       }
     }
 
@@ -797,7 +1139,7 @@
       if(state.tutorial.step===1 && state.tutorial.slide) state.tutorial.step=2;
       if(state.tutorial.step===2 && state.tutorial.power){
         state.tutorial.active = false;
-        localStorage.setItem('beacon_runner_tutorial_done', '1');
+        localStorage.setItem(STORAGE_KEYS.tutorialDone, '1');
       }
     }
 
@@ -810,8 +1152,8 @@
     }
 
     // Cleanup
-    while(obstacles.length && obstacles[0].y > H+260) obstacles.shift();
-    for(let i=powerups.length-1;i>=0;i--) if(powerups[i].y > H+260) powerups.splice(i,1);
+    removeOffscreen(obstacles);
+    removeOffscreen(powerups);
     for(let i=particles.length-1;i>=0;i--) if(particles[i].life<=0) particles.splice(i,1);
   }
 
@@ -890,9 +1232,9 @@
       const drone = ASSETS.drone;
       const r = 62;
       for(let i=0;i<2;i++){
-        const ang = state.t*3 + i*Math.PI;
+        const ang = state.t * 3 + i*Math.PI;
         const dx = Math.cos(ang)*r;
-        const dy = Math.sin(ang)*22;
+        const dy = Math.sin(ang) * 22;
         ctx.globalAlpha=0.85;
         if(drone && drone.complete){
           ctx.drawImage(drone, player.x+dx-18, player.y-50+dy-18, 36, 36);
@@ -909,9 +1251,7 @@
 
   function drawObstacles(){
     for(const o of obstacles){
-      const img = o.type==='high'
-        ? (o.variant===0 ? ASSETS.high1 : o.variant===1 ? ASSETS.high2 : ASSETS.high3) || ASSETS.high
-        : (o.variant===0 ? ASSETS.low1 : o.variant===1 ? ASSETS.low2 : ASSETS.low3) || ASSETS.low;
+      const img = getObstacleAsset(o);
       let w=o.drawW || o.w, h=o.drawH || o.h;
       if(o.type==='high' && img && img.complete){
         w = img.width;
@@ -941,31 +1281,21 @@
 
   function drawPowerups(){
     for(const p of powerups){
-      const img =
-        p.kind==='shield' ? ASSETS.shield :
-        p.kind==='magnet' ? ASSETS.magnet :
-        p.kind==='boost' ? ASSETS.boost :
-        p.kind==='coin' ? ASSETS.coin :
-        p.kind==='beacon' ? ASSETS.beacon :
-        ASSETS.power;
+      const visual = getPowerupVisual(p.kind);
+      const img = ASSETS[visual.assetKey];
       const w=p.w,h=p.h;
       ctx.save();
       // glow
       ctx.globalAlpha=0.35;
       ctx.beginPath();
       ctx.arc(p.x, p.y, 42, 0, Math.PI*2);
-      ctx.fillStyle =
-        p.kind==='shield' ? 'rgba(0,255,216,0.28)' :
-        p.kind==='magnet' ? 'rgba(255,184,77,0.25)' :
-        p.kind==='boost' ? 'rgba(123,92,255,0.24)' :
-        p.kind==='beacon' ? 'rgba(122,252,255,0.24)' :
-        'rgba(255,215,64,0.25)';
+      ctx.fillStyle = visual.glow;
       ctx.fill();
       ctx.globalAlpha=1;
 
       // spin
       ctx.translate(p.x,p.y);
-      ctx.rotate(Math.sin(p.spin)*0.25);
+      ctx.rotate(Math.sin(p.spin) * 0.25);
       if(img && img.complete){
         ctx.drawImage(img, -w/2, -h/2, w, h);
       } else if(p.kind==='coin'){
@@ -988,10 +1318,7 @@
       ctx.font = p.kind==='coin' ? '800 14px system-ui' : '12px system-ui';
       ctx.textAlign='center';
       ctx.fillStyle='rgba(232,247,255,.85)';
-      if(p.kind==='coin') ctx.fillText('+' + (p.value || 100), 0, 44);
-      else if(p.kind==='beacon') ctx.fillText('BEACON', 0, 44);
-      else if(p.kind==='boost') ctx.fillText('BOOST', 0, 44);
-      else ctx.fillText(p.kind.toUpperCase(), 0, 44);
+      ctx.fillText(getPowerupLabel(p), 0, 44);
       ctx.restore();
     }
   }
@@ -1003,6 +1330,40 @@
       ctx.fillStyle = pt.color;
       ctx.fillRect(pt.x-2, pt.y-2, 4, 4);
     }
+    ctx.restore();
+  }
+
+  function drawLifeLostOverlay(){
+    const timer = clamp(state.lifeLostIcon / LIFE_LOST_ICON_DURATION, 0, 1);
+    if(timer <= 0) return;
+
+    const go = ASSETS.gameOver;
+    const alpha = timer * 0.72;
+
+    ctx.save();
+    ctx.globalAlpha = alpha * 0.18;
+    ctx.fillStyle='rgba(0,0,0,0.28)';
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.globalAlpha = alpha;
+    if(go && go.complete){
+      const goY = H / 2 - 110;
+      drawFittedImage(go, W / 2, goY, 190, 68);
+    } else {
+      ctx.fillStyle='rgba(0,255,216,0.92)';
+      ctx.font='800 30px system-ui';
+      ctx.textAlign='center';
+      ctx.fillText('GAME OVER', W / 2, H / 2 - 22);
+    }
+
+    ctx.fillStyle='rgba(255,184,77,0.95)';
+    ctx.font='800 20px system-ui';
+    ctx.textAlign='center';
+    ctx.fillText('LIFE LOST', W / 2, H / 2 + 12);
+
+    ctx.fillStyle='rgba(232,247,255,0.82)';
+    ctx.font='600 13px system-ui';
+    ctx.fillText(state.lives + ' lives remaining', W / 2, H / 2 + 34);
     ctx.restore();
   }
 
@@ -1034,19 +1395,15 @@
     ctx.font='600 14px system-ui';
     ctx.fillText('Best: ' + state.best, 200, 55);
 
+    // Lives
+    ctx.fillStyle='rgba(255,184,77,0.92)';
+    ctx.font='700 14px system-ui';
+    ctx.fillText('Lives: ' + state.lives, 18, 78);
+
     // Power indicators
-    const bar = (x,y,label,t,maxT,clr)=>{
-      ctx.fillStyle='rgba(232,247,255,0.55)';
-      ctx.font='700 12px system-ui';
-      ctx.fillText(label, x, y);
-      ctx.fillStyle='rgba(255,255,255,0.15)';
-      ctx.fillRect(x+54, y-10, 110, 10);
-      ctx.fillStyle=clr;
-      ctx.fillRect(x+54, y-10, 110*clamp(t/maxT,0,1), 10);
-    };
-    bar(290, 28, 'SHIELD', state.shield, 6, 'rgba(0,255,216,0.75)');
-    bar(290, 52, 'MAGNET', state.magnet, 6, 'rgba(255,184,77,0.75)');
-    bar(290, 76, 'BOOST', state.boost, 4.5, 'rgba(123,92,255,0.75)');
+    for(const bar of HUD_BARS){
+      drawHudBar(bar.x, bar.y, bar.label, state[bar.key], bar.max, bar.color);
+    }
 
     ctx.restore();
 
@@ -1078,20 +1435,17 @@
       ctx.strokeRect(20, H-140, W-40, 92);
       ctx.fillStyle='rgba(232,247,255,0.92)';
       ctx.font='700 14px system-ui';
-      let tip = 'Swipe up or press ↑ to jump.';
-      if(state.tutorial.step===1) tip = 'Swipe down or press ↓ to slide.';
-      if(state.tutorial.step===2) tip = 'Grab any power-up.';
       ctx.textAlign='center';
       ctx.fillText('Tutorial', W/2, H-110);
       ctx.font='500 13px system-ui';
-      ctx.fillText(tip, W/2, H-88);
+      ctx.fillText(getTutorialTip(), W/2, H-88);
       ctx.restore();
     }
 
     // Toasts
     if(state.toast.t > 0){
       ctx.save();
-      ctx.globalAlpha = clamp(state.toast.t / 2.6, 0, 1);
+      ctx.globalAlpha = clamp(state.toast.t / TOAST_DURATION, 0, 1);
       ctx.fillStyle='rgba(0,0,0,0.6)';
       ctx.fillRect(W/2-160, 108, 320, 36);
       ctx.strokeStyle='rgba(0,255,216,0.4)';
@@ -1103,6 +1457,10 @@
       ctx.restore();
     }
 
+    if(state.mode==='playing' && state.lifeLostIcon > 0){
+      drawLifeLostOverlay();
+    }
+
     // overlays
     if(state.mode==='menu') {
       overlay('BEACON RUNNER', 'Press Enter or tap to start', 'Avoid high barriers by jumping and low barriers by sliding.');
@@ -1110,7 +1468,7 @@
     if(state.mode==='paused') {
       overlay('PAUSED', 'Press Space to resume', '');
     }
-    if(state.mode==='gameover') {
+    if(state.mode==='gameover' && !scoreEntryState.visible) {
       overlay('GAME OVER', 'Press Enter or tap to retry', 'Final score: ' + Math.floor(state.score));
     }
     if(state.mode==='loading') {
@@ -1141,36 +1499,16 @@
     if(state.mode==='gameover'){
       const go = ASSETS.gameOver;
       if(go && go.complete){
-        const maxW = 220;
-        const maxH = 80;
-        const aspect = go.width / go.height;
-        let goW = maxW;
-        let goH = Math.max(1, Math.round(goW / aspect));
-        if(goH > maxH){
-          goH = maxH;
-          goW = Math.max(1, Math.round(goH * aspect));
-        }
-        const goX = W/2 - goW/2;
         const goY = cy + 22;
-        ctx.drawImage(go, goX, goY, goW, goH);
+        const goH = drawFittedImage(go, W / 2, goY, 220, 80);
         titleY = goY + goH + 38;
       }
     }
 
     const logo = ASSETS.logo;
     if(state.mode==='menu' && logo && logo.complete){
-      const maxW = 260;
-      const maxH = 90;
-      const aspect = logo.width / logo.height;
-      let logoW = maxW;
-      let logoH = Math.max(1, Math.round(logoW / aspect));
-      if(logoH > maxH){
-        logoH = maxH;
-        logoW = Math.max(1, Math.round(logoH * aspect));
-      }
-      const logoX = W/2 - logoW/2;
       const logoY = cy + 64;
-      ctx.drawImage(logo, logoX, logoY, logoW, logoH);
+      drawFittedImage(logo, W / 2, logoY, 260, 90);
     } else {
       ctx.fillStyle='rgba(0,255,216,0.92)';
       ctx.font='800 34px system-ui';
