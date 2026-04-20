@@ -54,19 +54,6 @@
   const soundBtn = document.getElementById('soundBtn');
   const touchBtn = document.getElementById('touchBtn');
   const difficultyBtn = document.getElementById('difficultyBtn');
-  const modeLabel = document.getElementById('modeLabel');
-  const scoreLabel = document.getElementById('scoreLabel');
-  const bestLabel = document.getElementById('bestLabel');
-  const livesLabel = document.getElementById('livesLabel');
-  const weatherLabel = document.getElementById('weatherLabel');
-  const timeLabel = document.getElementById('timeLabel');
-  const segmentLabel = document.getElementById('segmentLabel');
-  const actionLabel = document.getElementById('actionLabel');
-  const coinsLabel = document.getElementById('coinsLabel');
-  const beaconsLabel = document.getElementById('beaconsLabel');
-  const passedLabel = document.getElementById('passedLabel');
-  const powerLabel = document.getElementById('powerLabel');
-
   const scoreModal = document.getElementById('scoreModal');
   const scoreModalScore = document.getElementById('scoreModalScore');
   const scoreModalStatus = document.getElementById('scoreModalStatus');
@@ -101,7 +88,6 @@
   const PICKUP_LANE_THRESHOLD = 0.34;
   const OBSTACLE_LANE_THRESHOLD = 0.23;
   const PIT_LANE_THRESHOLD = 0.21;
-  const SIDEBAR_REFRESH_INTERVAL = 0.12;
   const BASE_SPEED = 118;
   const MAX_SPEED = 184;
   const BOOST_EXTRA_SPEED = 92;
@@ -125,11 +111,11 @@
   const ATTRACT_RESET_DELAY = 0.5;
   const ATTRACT_THINK_INTERVAL = 0.06;
   const STORAGE_KEYS = {
-    best: 'beacon_runner_wasteland_best',
-    mute: 'beacon_runner_wasteland_mute',
-    superDifficulty: 'beacon_runner_wasteland_super_difficulty',
-    touchButtons: 'beacon_runner_wasteland_touch_buttons',
-    tutorialDone: 'beacon_runner_wasteland_tutorial_done'
+    best: 'beacon_runner_best',
+    mute: 'beacon_runner_mute',
+    superDifficulty: 'beacon_runner_super_difficulty',
+    touchButtons: 'beacon_runner_touch_buttons',
+    tutorialDone: 'beacon_runner_tutorial_done'
   };
 
   const DAY_STATES = [
@@ -246,8 +232,6 @@
   let lastTime = performance.now();
   let audioCtx = null;
   let audioResumePromise = null;
-  let sidebarRefreshTimer = 0;
-
   const renderFrame = {
     visible: [],
     byIndex: new Map(),
@@ -264,20 +248,8 @@
     scale: 1
   };
 
-  const sidebarCache = {
+  const uiCache = {
     modeDataset: '',
-    mode: '',
-    score: '',
-    best: '',
-    lives: '',
-    weather: '',
-    time: '',
-    segment: '',
-    action: '',
-    coins: '',
-    beacons: '',
-    passed: '',
-    power: '',
     pauseLabel: '',
     startLabel: '',
     soundLabel: '',
@@ -872,13 +844,13 @@
     primeAudio();
     hideScoreModal();
     resetRunState({ mode: 'playing', tutorial: !!options.tutorial, allowAutoTutorial: true });
-    updateSidebar(true);
+    syncUi(true);
   }
 
   function startAttractMode(){
     hideScoreModal();
     resetRunState({ mode: 'menu', tutorial: false, allowAutoTutorial: false, difficulty: 'normal' });
-    updateSidebar(true);
+    syncUi(true);
   }
 
   function startTutorialRun(){
@@ -905,13 +877,13 @@
     scoreEntryState.savedEntry = null;
     playSound('gameover');
     hideScoreModal();
-    updateSidebar(true);
+    syncUi(true);
   }
 
   function togglePause(){
     if(state.mode === 'playing') state.mode = 'paused';
     else if(state.mode === 'paused') state.mode = 'playing';
-    updateSidebar(true);
+    syncUi(true);
   }
 
   function onLane(dir, options = {}){
@@ -1587,7 +1559,7 @@
       state.oneUpTimer = ONE_UP_DURATION;
       playSound('beacon');
       vibrate([12, 20, 12]);
-      updateSidebar(true);
+      syncUi(true);
     }
   }
 
@@ -1786,42 +1758,24 @@
 
   }
 
-  function syncLabel(node, cacheKey, value){
+  function syncUiLabel(node, cacheKey, value){
     if(!node) return;
-    if(sidebarCache[cacheKey] === value) return;
-    sidebarCache[cacheKey] = value;
+    if(uiCache[cacheKey] === value) return;
+    uiCache[cacheKey] = value;
     node.textContent = value;
   }
 
-  function updateSidebar(force){
-    let powerState = 'None';
-    if(state.boost > 0) powerState = 'Boost';
-    else if(state.magnet > 0) powerState = 'Magnet';
-    else if(state.shield > 0) powerState = 'Shield';
-
-    if(force || sidebarCache.modeDataset !== state.mode){
-      sidebarCache.modeDataset = state.mode;
+  function syncUi(force){
+    if(force || uiCache.modeDataset !== state.mode){
+      uiCache.modeDataset = state.mode;
       document.body.dataset.mode = state.mode;
     }
 
-    syncLabel(modeLabel, 'mode', state.mode === 'playing' ? 'Run' : state.mode === 'paused' ? 'Pause' : state.mode === 'gameover' ? 'Over' : 'Menu');
-    syncLabel(scoreLabel, 'score', String(Math.floor(state.score)));
-    syncLabel(bestLabel, 'best', String(Math.floor(state.best)));
-    syncLabel(livesLabel, 'lives', String(state.lives));
-    syncLabel(weatherLabel, 'weather', getCycleState(WEATHER_STATES, state.weatherClock, 18).current.name);
-    syncLabel(timeLabel, 'time', getCycleState(DAY_STATES, state.dayClock, 34).current.name);
-    syncLabel(segmentLabel, 'segment', state.currentTag);
-    syncLabel(actionLabel, 'action', state.action);
-    syncLabel(coinsLabel, 'coins', String(state.run.coins));
-    syncLabel(beaconsLabel, 'beacons', String(state.run.beacons));
-    syncLabel(passedLabel, 'passed', String(state.run.passed));
-    syncLabel(powerLabel, 'power', powerState);
-    syncLabel(pauseBtn, 'pauseLabel', state.mode === 'paused' ? 'Resume' : 'Pause');
-    syncLabel(startBtn, 'startLabel', state.mode === 'menu' ? 'Start Run' : 'Restart Run');
-    syncLabel(soundBtn, 'soundLabel', settings.muted ? 'Sound: Off' : 'Sound: On');
-    syncLabel(touchBtn, 'touchLabel', settings.touchButtons ? 'Controls: On' : 'Controls: Off');
-    syncLabel(difficultyBtn, 'difficultyLabel', settings.superDifficulty ? 'Difficulty: Super' : 'Difficulty: Normal');
-    sidebarRefreshTimer = SIDEBAR_REFRESH_INTERVAL;
+    syncUiLabel(pauseBtn, 'pauseLabel', state.mode === 'paused' ? 'Resume' : 'Pause');
+    syncUiLabel(startBtn, 'startLabel', state.mode === 'menu' ? 'Start Run' : 'Restart Run');
+    syncUiLabel(soundBtn, 'soundLabel', settings.muted ? 'Sound: Off' : 'Sound: On');
+    syncUiLabel(touchBtn, 'touchLabel', settings.touchButtons ? 'Controls: On' : 'Controls: Off');
+    syncUiLabel(difficultyBtn, 'difficultyLabel', settings.superDifficulty ? 'Difficulty: Super' : 'Difficulty: Normal');
   }
 
   function update(dt){
@@ -1886,8 +1840,6 @@
     const currentSegment = state.segments[currentIndex] || state.segments[0];
     state.currentTag = currentSegment ? currentSegment.tag : 'Dust Run';
     state.action = state.hitFlash > 0 ? 'Hit' : !state.grounded ? 'Jump' : 'Run';
-    sidebarRefreshTimer -= dt;
-    if(sidebarRefreshTimer <= 0) updateSidebar();
   }
 
   function projectPoint(worldX, worldY, relZ, width, out){
@@ -2371,12 +2323,6 @@
     ctx.scale(squashX, squashY);
     ctx.translate(-playerX, -(bodyY + 6));
 
-    ctx.globalAlpha = 0.2;
-    ctx.fillStyle = 'rgba(28,20,15,0.78)';
-    ctx.beginPath();
-    ctx.ellipse(playerX, bodyY + 20, 62, 18, 0, 0, Math.PI * 2);
-    ctx.fill();
-
     if(state.shield > 0){
       ctx.globalAlpha = 0.18 + Math.sin(frameNow * 0.012) * 0.06;
       ctx.fillStyle = 'rgba(157,219,183,0.72)';
@@ -2410,11 +2356,6 @@
       }
     }
 
-    ctx.globalAlpha = 0.14;
-    ctx.fillStyle = 'rgba(225,164,90,0.6)';
-    ctx.beginPath();
-    ctx.arc(playerX, bodyY - 46 + bob, 66, 0, Math.PI * 2);
-    ctx.fill();
     ctx.globalAlpha = 1;
 
     const sheet = images.sheet;
@@ -2424,9 +2365,6 @@
       const drawW = 126;
       const drawH = 168;
       ctx.drawImage(sheet, sx, 0, 96, 128, playerX - drawW / 2, bodyY - drawH + bob, drawW, drawH);
-    } else {
-      ctx.fillStyle = '#9ddbb7';
-      ctx.fillRect(playerX - 28, bodyY - 92 + bob, 56, 92);
     }
 
     ctx.restore();
@@ -2966,7 +2904,7 @@
     soundBtn.addEventListener('click', () => {
       settings.muted = !settings.muted;
       saveSettings();
-      updateSidebar(true);
+      syncUi(true);
       if(!settings.muted){
         primeAudio();
         playSound('coin');
@@ -2979,7 +2917,7 @@
       settings.touchButtons = !settings.touchButtons;
       saveSettings();
       applyTouchButtons();
-      updateSidebar(true);
+      syncUi(true);
       toast(settings.touchButtons ? 'Touch controls on' : 'Touch controls off');
     });
   }
@@ -2987,7 +2925,7 @@
     difficultyBtn.addEventListener('click', () => {
       settings.superDifficulty = !settings.superDifficulty;
       saveSettings();
-      updateSidebar(true);
+      syncUi(true);
       if(state.mode === 'playing' || state.mode === 'paused'){
         toast(settings.superDifficulty ? 'Super difficulty set for the next run' : 'Normal difficulty set for the next run');
       } else {
@@ -3018,7 +2956,8 @@
   startAttractMode();
   fitCanvas();
   applyTouchButtons();
-  updateSidebar(true);
+  syncUi(true);
   requestAnimationFrame(tick);
 })();
+
 
