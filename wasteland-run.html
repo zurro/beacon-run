@@ -300,12 +300,13 @@
         font-size:11px;
         scroll-snap-align:start;
       }
-      .touch-pad{
+      body.show-touch .touch-pad{
         display:grid;
         grid-template-columns:repeat(3, minmax(58px, 18vw));
         gap:8px;
         bottom:calc(var(--safe-bottom) + 6px);
       }
+      body.hide-touch .touch-pad{ display:none; }
       .touch-btn{
         width:clamp(58px, 18vw, 72px);
         height:clamp(58px, 18vw, 72px);
@@ -322,7 +323,7 @@
     @media (max-width: 560px){ .score-title{ font-size:28px; } .score-final-value{ font-size:32px; } .score-entry-input{ font-size:24px; letter-spacing:.24em; } .score-row{ grid-template-columns:28px 1fr auto; gap:10px; } .score-name{ font-size:16px; letter-spacing:.12em; } .score-value{ font-size:15px; } .stats{ grid-template-columns:1fr 1fr; } }
   </style>
 </head>
-<body>
+<body class="hide-touch">
   <main class="page">
     <header class="topbar">
       <div class="brand">
@@ -338,6 +339,7 @@
         <button id="pauseBtn" class="action" type="button">Pause</button>
         <button id="tutorialBtn" class="action" type="button">Tutorial</button>
         <button id="hapticsBtn" class="action" type="button">Haptics: On</button>
+        <button id="touchBtn" class="action" type="button">Controls: Off</button>
         <button id="difficultyBtn" class="action" type="button">Difficulty: Normal</button>
         <a class="action" href="classic.html">Classic Mode</a>
         <a class="action" href="scorecard.html">Scores</a>

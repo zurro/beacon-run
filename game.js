@@ -56,12 +56,11 @@
   };
 
   const storedTouchButtons = localStorage.getItem(STORAGE_KEYS.touchButtons);
-  const prefersTouchInput = (navigator.maxTouchPoints || 0) > 0 || (window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
   const settings = {
     muted: localStorage.getItem(STORAGE_KEYS.mute) === '1',
     haptics: localStorage.getItem(STORAGE_KEYS.haptics) !== '0',
     fpsLimit: Number(localStorage.getItem(STORAGE_KEYS.fps) || '60'),
-    touchButtons: storedTouchButtons === null ? prefersTouchInput : storedTouchButtons !== '0'
+    touchButtons: storedTouchButtons !== null && storedTouchButtons !== '0'
   };
 
   const totals = {
@@ -664,7 +663,7 @@
     if(muteBtn) muteBtn.textContent = settings.muted ? 'Sound: Off' : 'Sound: On';
     if(hapticsBtn) hapticsBtn.textContent = settings.haptics ? 'Haptics: On' : 'Haptics: Off';
     if(fpsBtn) fpsBtn.textContent = settings.fpsLimit ? ('FPS: ' + settings.fpsLimit) : 'FPS: Unlimited';
-    if(touchBtn) touchBtn.textContent = settings.touchButtons ? 'Buttons: On' : 'Buttons: Off';
+    if(touchBtn) touchBtn.textContent = settings.touchButtons ? 'Controls: On' : 'Controls: Off';
   }
 
   if(muteBtn){

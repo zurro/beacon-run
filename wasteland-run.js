@@ -19,6 +19,7 @@
   const pauseBtn = document.getElementById('pauseBtn');
   const tutorialBtn = document.getElementById('tutorialBtn');
   const hapticsBtn = document.getElementById('hapticsBtn');
+  const touchBtn = document.getElementById('touchBtn');
   const difficultyBtn = document.getElementById('difficultyBtn');
   const modeLabel = document.getElementById('modeLabel');
   const scoreLabel = document.getElementById('scoreLabel');
@@ -86,6 +87,7 @@
     best: 'beacon_runner_wasteland_best',
     superDifficulty: 'beacon_runner_wasteland_super_difficulty',
     haptics: 'beacon_runner_wasteland_haptics',
+    touchButtons: 'beacon_runner_wasteland_touch_buttons',
     tutorialDone: 'beacon_runner_wasteland_tutorial_done'
   };
 
@@ -184,7 +186,8 @@
 
   const settings = {
     superDifficulty: localStorage.getItem(STORAGE_KEYS.superDifficulty) === '1',
-    haptics: localStorage.getItem(STORAGE_KEYS.haptics) !== '0'
+    haptics: localStorage.getItem(STORAGE_KEYS.haptics) !== '0',
+    touchButtons: localStorage.getItem(STORAGE_KEYS.touchButtons) === '1'
   };
 
   const scoreEntryState = { visible: false, qualifies: false, saved: false };
@@ -227,6 +230,7 @@
     pauseLabel: '',
     startLabel: '',
     hapticsLabel: '',
+    touchLabel: '',
     difficultyLabel: ''
   };
 
@@ -427,6 +431,12 @@
   function saveSettings(){
     localStorage.setItem(STORAGE_KEYS.superDifficulty, settings.superDifficulty ? '1' : '0');
     localStorage.setItem(STORAGE_KEYS.haptics, settings.haptics ? '1' : '0');
+    localStorage.setItem(STORAGE_KEYS.touchButtons, settings.touchButtons ? '1' : '0');
+  }
+
+  function applyTouchButtons(){
+    document.body.classList.toggle('show-touch', settings.touchButtons);
+    document.body.classList.toggle('hide-touch', !settings.touchButtons);
   }
 
   function vibrate(pattern){
@@ -1501,6 +1511,7 @@
     syncLabel(pauseBtn, 'pauseLabel', state.mode === 'paused' ? 'Resume' : 'Pause');
     syncLabel(startBtn, 'startLabel', state.mode === 'menu' ? 'Start Run' : 'Restart Run');
     syncLabel(hapticsBtn, 'hapticsLabel', settings.haptics ? 'Haptics: On' : 'Haptics: Off');
+    syncLabel(touchBtn, 'touchLabel', settings.touchButtons ? 'Controls: On' : 'Controls: Off');
     syncLabel(difficultyBtn, 'difficultyLabel', settings.superDifficulty ? 'Difficulty: Super' : 'Difficulty: Normal');
     sidebarRefreshTimer = SIDEBAR_REFRESH_INTERVAL;
   }
@@ -2423,6 +2434,15 @@
       toast(settings.haptics ? 'Haptics enabled' : 'Haptics disabled');
     });
   }
+  if(touchBtn){
+    touchBtn.addEventListener('click', () => {
+      settings.touchButtons = !settings.touchButtons;
+      saveSettings();
+      applyTouchButtons();
+      updateSidebar(true);
+      toast(settings.touchButtons ? 'Touch buttons enabled' : 'Touch buttons hidden');
+    });
+  }
   if(difficultyBtn){
     difficultyBtn.addEventListener('click', () => {
       settings.superDifficulty = !settings.superDifficulty;
@@ -2457,6 +2477,7 @@
 
   resetWorld();
   fitCanvas();
+  applyTouchButtons();
   updateSidebar(true);
   requestAnimationFrame(tick);
 })();
