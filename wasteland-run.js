@@ -81,6 +81,8 @@
 
   const VIEW_W = 1280;
   const VIEW_H = 760;
+  const DISPLAY_FONT_STACK = '"Bahnschrift","Arial Narrow","Trebuchet MS","Segoe UI",Arial,sans-serif';
+  const BODY_FONT_STACK = '"Bahnschrift","Trebuchet MS","Segoe UI",Arial,sans-serif';
   const HORIZON_Y = 0.19;
   const CAMERA_HEIGHT = 0.92;
   const CAMERA_DEPTH = 1.15;
@@ -102,10 +104,10 @@
   const SIDEBAR_REFRESH_INTERVAL = 0.12;
   const BASE_SPEED = 118;
   const MAX_SPEED = 184;
-  const BOOST_EXTRA_SPEED = 72;
+  const BOOST_EXTRA_SPEED = 92;
   const SUPER_BASE_SPEED = 152;
   const SUPER_MAX_SPEED = 234;
-  const SUPER_BOOST_EXTRA_SPEED = 86;
+  const SUPER_BOOST_EXTRA_SPEED = 112;
   const STARTING_LIVES = 3;
   const COINS_PER_EXTRA_LIFE = 100;
   const JUMP_VELOCITY = 7.4;
@@ -667,6 +669,7 @@
 
     if(scoreModalScore) scoreModalScore.textContent = String(finalScore);
     if(scoreEntrySection) scoreEntrySection.hidden = !scoreEntryState.qualifies || scoreEntryState.saved;
+    if(scoreModal) scoreModal.classList.toggle('entry-active', !!scoreEntrySection && !scoreEntrySection.hidden);
     if(saveScoreBtn){
       saveScoreBtn.hidden = !scoreEntryState.qualifies && !scoreEntryState.saved;
       saveScoreBtn.disabled = !canSave;
@@ -695,6 +698,7 @@
     scoreEntryState.visible = false;
     lastScoreModalSnapshot = '';
     if(scoreModal) scoreModal.hidden = true;
+    if(scoreModal) scoreModal.classList.remove('entry-active');
   }
 
   function openScoreModal(){
@@ -1620,8 +1624,8 @@
       }
     } else if(item.kind === 'boost'){
       state.boost = BOOST_DURATION;
-      state.speed = Math.max(state.speed, getBaseSpeed() + 58);
-      state.speedTarget = Math.max(state.speedTarget, getMaxSpeed() + getBoostExtraSpeed() * 0.55);
+      state.speed = Math.max(state.speed, getBaseSpeed() + getBoostExtraSpeed() * 0.9);
+      state.speedTarget = Math.max(state.speedTarget, getMaxSpeed() + getBoostExtraSpeed() * 0.9);
       state.run.boosts++;
       if(!attract){
         toast('Boost on');
@@ -2250,7 +2254,7 @@
     if(label){
       const labelY = y + Math.max(16, height * 0.38);
       const fontSize = Math.round(clamp(size * (isPowerPickup ? 0.26 : 0.24), isPowerPickup ? 12 : 11, isPowerPickup ? 20 : 18));
-      ctx.font = (isScorePickup ? '800 ' : '900 ') + fontSize + 'px system-ui';
+      ctx.font = (isScorePickup ? '800 ' : '900 ') + fontSize + 'px ' + DISPLAY_FONT_STACK;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       if(isPowerPickup){
@@ -2456,7 +2460,7 @@
       ctx.fill();
     }
     ctx.fillStyle = 'rgba(232,247,255,0.96)';
-    ctx.font = (compact ? '800 11px' : '800 12px') + ' "Trebuchet MS", sans-serif';
+    ctx.font = (compact ? '800 11px' : '800 12px') + ' ' + DISPLAY_FONT_STACK;
     ctx.textBaseline = 'middle';
     ctx.fillText(formatHudCounter(state.lives), valueX, centerY + 0.5);
     ctx.textBaseline = 'alphabetic';
@@ -2488,7 +2492,7 @@
     }
 
     ctx.fillStyle = 'rgba(255,199,112,0.98)';
-    ctx.font = (compact ? '800 11px' : '800 12px') + ' "Trebuchet MS", sans-serif';
+    ctx.font = (compact ? '800 11px' : '800 12px') + ' ' + DISPLAY_FONT_STACK;
     ctx.textBaseline = 'middle';
     ctx.fillText(formatHudCounter(progress), valueX, centerY + 0.5);
     ctx.textBaseline = 'alphabetic';
@@ -2513,11 +2517,11 @@
     ctx.strokeStyle = palette.stroke;
     ctx.strokeRect(originX, originY, width, height);
     ctx.fillStyle = palette.label;
-    ctx.font = (compact ? '700 7px' : '700 8px') + ' "Trebuchet MS", sans-serif';
+    ctx.font = (compact ? '700 7px' : '700 8px') + ' ' + DISPLAY_FONT_STACK;
     ctx.fillText(label, originX + 6, originY + (compact ? 9 : 10));
     ctx.textAlign = 'right';
     ctx.fillStyle = palette.value;
-    ctx.font = '800 ' + valueSize + 'px "Trebuchet MS", sans-serif';
+    ctx.font = '800 ' + valueSize + 'px ' + DISPLAY_FONT_STACK;
     ctx.fillText(valueText, originX + width - 6, originY + (compact ? 20 : 23));
     ctx.textAlign = 'left';
   }
@@ -2624,13 +2628,13 @@
     ctx.fillRect(x + 1, y + 1, width - 2, 26);
     ctx.textAlign = 'center';
     ctx.fillStyle = 'rgba(0,255,216,0.82)';
-    ctx.font = '700 12px "Trebuchet MS", sans-serif';
+    ctx.font = '700 12px ' + DISPLAY_FONT_STACK;
     ctx.fillText(meta.title + ' of 3', (viewFrame.left + viewFrame.right) * 0.5, y + 18);
     ctx.fillStyle = 'rgba(232,247,255,0.92)';
-    ctx.font = '800 24px "Trebuchet MS", sans-serif';
+    ctx.font = '800 24px ' + DISPLAY_FONT_STACK;
     ctx.fillText(meta.heading, (viewFrame.left + viewFrame.right) * 0.5, y + 50);
     ctx.fillStyle = 'rgba(232,247,255,0.74)';
-    ctx.font = '600 14px "Trebuchet MS", sans-serif';
+    ctx.font = '600 14px ' + BODY_FONT_STACK;
     ctx.fillText(meta.tip, (viewFrame.left + viewFrame.right) * 0.5, y + 72);
     const barX = x + 28;
     const barY = y + 86;
@@ -2652,7 +2656,7 @@
       ctx.strokeStyle = 'rgba(0,255,216,0.22)';
       ctx.strokeRect(badgeX, badgeY, badgeWidth, 24);
       ctx.fillStyle = 'rgba(232,247,255,0.92)';
-      ctx.font = '700 12px "Trebuchet MS", sans-serif';
+      ctx.font = '700 12px ' + DISPLAY_FONT_STACK;
       ctx.fillText(label, badgeX + badgeWidth * 0.5, badgeY + 16);
     });
     ctx.textAlign = 'left';
@@ -2695,7 +2699,7 @@
     }
 
     ctx.fillStyle = 'rgba(255,220,166,0.98)';
-    ctx.font = '900 ' + textSize + 'px "Trebuchet MS", sans-serif';
+    ctx.font = '900 ' + textSize + 'px ' + DISPLAY_FONT_STACK;
     ctx.fillText(text, centerX, topY + iconSize + textSize - 2);
     ctx.restore();
   }
@@ -2719,10 +2723,10 @@
     ctx.lineWidth = 2;
     ctx.strokeRect(x, y, width, 96);
     ctx.fillStyle = 'rgba(232,247,255,0.95)';
-    ctx.font = '800 30px "Trebuchet MS", sans-serif';
+    ctx.font = '800 30px ' + DISPLAY_FONT_STACK;
     ctx.textAlign = 'center';
     ctx.fillText(state.warning || 'Watch the timing', (viewFrame.left + viewFrame.right) * 0.5, y + 44);
-    ctx.font = '600 14px "Trebuchet MS", sans-serif';
+    ctx.font = '600 14px ' + BODY_FONT_STACK;
     ctx.fillText('Up jumps. Left and right switch lanes.', (viewFrame.left + viewFrame.right) * 0.5, y + 72);
     ctx.restore();
   }
@@ -2756,7 +2760,7 @@
       ctx.textAlign = 'center';
       ctx.globalAlpha = enterBlink;
       ctx.fillStyle = 'rgba(232,247,255,0.96)';
-      ctx.font = '800 42px "Trebuchet MS", sans-serif';
+      ctx.font = '800 42px ' + DISPLAY_FONT_STACK;
       ctx.fillText('PRESS ENTER', centerX, centerY + 16);
       ctx.restore();
       return;
@@ -2774,7 +2778,7 @@
     }
     ctx.fillStyle = 'rgba(232,247,255,0.96)';
     ctx.textAlign = 'center';
-    ctx.font = '800 42px "Trebuchet MS", sans-serif';
+    ctx.font = '800 42px ' + DISPLAY_FONT_STACK;
     const title = state.mode === 'paused' ? 'PAUSED' : state.mode === 'gameover' ? 'GAME OVER' : 'PRESS ENTER';
     ctx.fillText(title, centerX, centerY);
     ctx.restore();
@@ -3017,3 +3021,4 @@
   updateSidebar(true);
   requestAnimationFrame(tick);
 })();
+

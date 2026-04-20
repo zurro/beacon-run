@@ -16,9 +16,12 @@
       --muted:rgba(232,247,255,0.66);
       --accent:#ffb84d;
       --danger:#ff7c5a;
+      --font-body:"Bahnschrift","Trebuchet MS","Segoe UI",Arial,sans-serif;
+      --font-display:"Bahnschrift","Arial Narrow","Trebuchet MS","Segoe UI",Arial,sans-serif;
+      --font-mono:"Consolas","Courier New",monospace;
     }
     *{ box-sizing:border-box; }
-    html,body{ height:100%; min-height:100%; margin:0; background:var(--bg); color:var(--text); font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; }
+    html,body{ height:100%; min-height:100%; margin:0; background:var(--bg); color:var(--text); font-family:var(--font-body); }
     body::before{
       content:"";
       position:fixed;
@@ -57,6 +60,7 @@
       cursor:pointer;
       backdrop-filter:blur(6px);
       min-height:38px;
+      font-family:var(--font-display);
     }
     .toggle-btn.primary{ background:linear-gradient(135deg, rgba(0,255,216,.18), rgba(0,255,216,.08)); }
     .toggle-btn.danger{
@@ -95,6 +99,7 @@
       letter-spacing:.28em;
       text-transform:uppercase;
       color:rgba(0,255,216,.7);
+      font-family:var(--font-display);
     }
     .board-head{
       display:flex;
@@ -109,6 +114,7 @@
       line-height:1;
       font-weight:800;
       letter-spacing:.04em;
+      font-family:var(--font-display);
     }
     .board-meta{
       font-size:12px;
@@ -132,7 +138,7 @@
       border-radius:14px;
       background:rgba(255,255,255,.03);
       border:1px solid rgba(255,255,255,.05);
-      font-family:"Consolas","Courier New",monospace;
+      font-family:var(--font-mono);
     }
     .score-row.top-three{
       border-color:rgba(255,184,77,.2);
