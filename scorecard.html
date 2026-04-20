@@ -3,6 +3,9 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'" />
   <title>Beacon Runner Scorecard</title>
   <style>
@@ -161,8 +164,7 @@
 <body>
   <div class="controls">
     <div class="toggles">
-      <a class="toggle-btn primary" href="index.html">Wasteland Mode</a>
-      <a class="toggle-btn" href="classic.html">Classic Mode</a>
+      <a class="toggle-btn primary" href="index.html">Back To Game</a>
       <button id="resetScoresBtn" class="toggle-btn danger" type="button">Reset Leaderboard</button>
     </div>
   </div>
@@ -180,8 +182,8 @@
     </section>
   </main>
 
-  <script src="score-utils.js"></script>
-  <script src="dom-utils.js"></script>
-  <script src="scorecard.js"></script>
+  <script src="score-utils.js?v=20260420a"></script>
+  <script src="dom-utils.js?v=20260420a"></script>
+  <script src="scorecard.js?v=20260420a"></script>
 </body>
 </html>

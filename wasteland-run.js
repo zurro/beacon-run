@@ -1,4 +1,37 @@
 (() => {
+  function showFatalOverlay(title, detail){
+    if(!document || !document.body) return;
+    let pre = document.getElementById('fatalOverlay');
+    if(!pre){
+      pre = document.createElement('pre');
+      pre.id = 'fatalOverlay';
+      pre.style.position = 'fixed';
+      pre.style.inset = '0';
+      pre.style.zIndex = '9999';
+      pre.style.margin = '0';
+      pre.style.padding = '24px';
+      pre.style.whiteSpace = 'pre-wrap';
+      pre.style.overflow = 'auto';
+      pre.style.background = '#120a0a';
+      pre.style.color = '#ffd7d7';
+      pre.style.font = '14px/1.45 Consolas, monospace';
+      document.body.appendChild(pre);
+    }
+    pre.textContent = title + '\n\n' + detail;
+  }
+
+  window.addEventListener('error', (event) => {
+    const source = [event.filename || '', event.lineno || 0, event.colno || 0].filter(Boolean).join(':');
+    const stack = event.error && event.error.stack ? '\n\n' + event.error.stack : '';
+    showFatalOverlay('Beacon Runner fatal error', String(event.message || 'Unknown error') + (source ? '\n' + source : '') + stack);
+  });
+
+  window.addEventListener('unhandledrejection', (event) => {
+    const reason = event && event.reason;
+    const text = reason && reason.stack ? reason.stack : String(reason || 'Unknown rejection');
+    showFatalOverlay('Beacon Runner unhandled rejection', text);
+  });
+
   const canvas = document.getElementById('runCanvas');
   const ctx = canvas.getContext('2d');
   const domApi = window.BeaconRunDom || {
@@ -18,7 +51,7 @@
   const startBtn = document.getElementById('startBtn');
   const pauseBtn = document.getElementById('pauseBtn');
   const tutorialBtn = document.getElementById('tutorialBtn');
-  const hapticsBtn = document.getElementById('hapticsBtn');
+  const soundBtn = document.getElementById('soundBtn');
   const touchBtn = document.getElementById('touchBtn');
   const difficultyBtn = document.getElementById('difficultyBtn');
   const modeLabel = document.getElementById('modeLabel');
@@ -74,6 +107,7 @@
   const SUPER_MAX_SPEED = 234;
   const SUPER_BOOST_EXTRA_SPEED = 86;
   const STARTING_LIVES = 3;
+  const COINS_PER_EXTRA_LIFE = 100;
   const JUMP_VELOCITY = 7.4;
   const GRAVITY = 18.6;
   const JUMP_BUFFER_TIME = 0.14;
@@ -83,10 +117,15 @@
   const BOOST_DURATION = 5.4;
   const HIT_FLASH_DURATION = 0.72;
   const RECOVERY_DURATION = 1.05;
+  const GAMEOVER_HOLD_DURATION = 3;
+  const GAMEOVER_FADE_DURATION = 0.78;
+  const ONE_UP_DURATION = 1.75;
+  const ATTRACT_RESET_DELAY = 0.5;
+  const ATTRACT_THINK_INTERVAL = 0.06;
   const STORAGE_KEYS = {
     best: 'beacon_runner_wasteland_best',
+    mute: 'beacon_runner_wasteland_mute',
     superDifficulty: 'beacon_runner_wasteland_super_difficulty',
-    haptics: 'beacon_runner_wasteland_haptics',
     touchButtons: 'beacon_runner_wasteland_touch_buttons',
     tutorialDone: 'beacon_runner_wasteland_tutorial_done'
   };
@@ -116,12 +155,16 @@
   };
 
   const images = loadImages({
+    logo: 'assets/beaconrun.png',
     sheet: 'assets/character_sheet.png',
     coin: 'assets/coin.png',
+    life: 'assets/life.png',
     beacon: 'assets/beacon.png',
     shield: 'assets/shield.png',
     magnet: 'assets/magnet.png',
     boost: 'assets/boost.png',
+    drone: 'assets/drone.png',
+    gameover: 'assets/gameover.png',
     wall1: 'assets/obstacles_wall_1.png',
     wall2: 'assets/obstacles_wall_2.png',
     pit1: 'assets/obstacle_high_1.png',
@@ -135,6 +178,7 @@
     best: Number(localStorage.getItem(STORAGE_KEYS.best) || '0'),
     difficulty: 'normal',
     lives: STARTING_LIVES,
+    maxLives: STARTING_LIVES,
     speed: BASE_SPEED,
     speedTarget: BASE_SPEED,
     position: 0,
@@ -155,9 +199,13 @@
     boost: 0,
     hitFlash: 0,
     shake: 0,
+    gameOverHold: 0,
+    attractResetTimer: 0,
+    attractThinkTimer: 0,
     warning: '',
     warningTimer: 0,
     toast: { text: '', timer: 0 },
+    oneUpTimer: 0,
     currentTag: 'Dust Run',
     action: 'Idle',
     dayClock: 0,
@@ -185,16 +233,17 @@
   };
 
   const settings = {
+    muted: localStorage.getItem(STORAGE_KEYS.mute) === '1',
     superDifficulty: localStorage.getItem(STORAGE_KEYS.superDifficulty) === '1',
-    haptics: localStorage.getItem(STORAGE_KEYS.haptics) !== '0',
     touchButtons: localStorage.getItem(STORAGE_KEYS.touchButtons) === '1'
   };
 
-  const scoreEntryState = { visible: false, qualifies: false, saved: false };
+  const scoreEntryState = { visible: false, qualifies: false, saved: false, savedEntry: null };
   let lastScoreModalSnapshot = '';
   let nextItemId = 1;
   let lastTime = performance.now();
   let audioCtx = null;
+  let audioResumePromise = null;
   let sidebarRefreshTimer = 0;
 
   const renderFrame = {
@@ -229,7 +278,7 @@
     power: '',
     pauseLabel: '',
     startLabel: '',
-    hapticsLabel: '',
+    soundLabel: '',
     touchLabel: '',
     difficultyLabel: ''
   };
@@ -340,6 +389,14 @@
     return Math.random() < 0.5 ? 'wall1' : 'wall2';
   }
 
+  function isAttractMode(){
+    return state.mode === 'menu';
+  }
+
+  function imageReady(image){
+    return !!(image && image.complete && image.naturalWidth > 0 && image.naturalHeight > 0);
+  }
+
   function hexToRgb(hex){
     const clean = hex.replace('#', '');
     return {
@@ -375,18 +432,34 @@
   }
 
   function getCycleState(list, clock, duration){
-    const wrapped = (clock / duration) % list.length;
-    const index = Math.floor(wrapped);
-    const next = (index + 1) % list.length;
-    return { current: list[index], next: list[next], t: wrapped - index };
+    if(!Array.isArray(list) || list.length === 0){
+      return { current: null, next: null, t: 0 };
+    }
+    const safeClock = Number.isFinite(clock) ? clock : 0;
+    const safeDuration = Number.isFinite(duration) && duration > 0 ? duration : 1;
+    const raw = safeClock / safeDuration;
+    const wrapped = ((raw % list.length) + list.length) % list.length;
+    const index = Math.floor(wrapped) % list.length;
+    const current = list[index] || list[0];
+    const next = list[(index + 1) % list.length] || current;
+    return { current, next, t: wrapped - index };
   }
 
   function getCachedSkyGradient(dayState){
-    const blend = Math.round(dayState.t * 64) / 64;
-    const top = mixColor(dayState.current.top, dayState.next.top, blend);
-    const mid = mixColor(dayState.current.mid, dayState.next.mid, blend);
-    const low = mixColor(dayState.current.low, dayState.next.low, blend);
-    const bottom = mixColor(dayState.current.bottom, dayState.next.bottom, blend);
+    const fallback = DAY_STATES[0] || {
+      top: '#6d472d',
+      mid: '#9c6a45',
+      low: '#4b3626',
+      bottom: '#1b140f',
+      glow: 'rgba(240,191,120,0.18)'
+    };
+    const current = dayState && dayState.current ? dayState.current : fallback;
+    const next = dayState && dayState.next ? dayState.next : current;
+    const blend = Math.round(clamp(dayState && Number.isFinite(dayState.t) ? dayState.t : 0, 0, 1) * 64) / 64;
+    const top = mixColor(current.top, next.top, blend);
+    const mid = mixColor(current.mid, next.mid, blend);
+    const low = mixColor(current.low, next.low, blend);
+    const bottom = mixColor(current.bottom, next.bottom, blend);
     const key = [top, mid, low, bottom].join('|');
     if(skyRenderCache.gradientKey !== key){
       const gradient = ctx.createLinearGradient(0, 0, 0, VIEW_H);
@@ -429,8 +502,8 @@
   function getBoostExtraSpeed(){ return isSuperDifficulty() ? SUPER_BOOST_EXTRA_SPEED : BOOST_EXTRA_SPEED; }
 
   function saveSettings(){
+    localStorage.setItem(STORAGE_KEYS.mute, settings.muted ? '1' : '0');
     localStorage.setItem(STORAGE_KEYS.superDifficulty, settings.superDifficulty ? '1' : '0');
-    localStorage.setItem(STORAGE_KEYS.haptics, settings.haptics ? '1' : '0');
     localStorage.setItem(STORAGE_KEYS.touchButtons, settings.touchButtons ? '1' : '0');
   }
 
@@ -440,7 +513,6 @@
   }
 
   function vibrate(pattern){
-    if(!settings.haptics) return;
     if(navigator.vibrate) navigator.vibrate(pattern);
   }
 
@@ -448,45 +520,71 @@
     const Ctor = window.AudioContext || window.webkitAudioContext;
     if(!Ctor) return null;
     if(!audioCtx) audioCtx = new Ctor();
-    if(audioCtx.state === 'suspended') audioCtx.resume();
     return audioCtx;
+  }
+
+  function primeAudio(){
+    const ac = ensureAudio();
+    if(!ac) return Promise.resolve(null);
+    if(ac.state === 'running') return Promise.resolve(ac);
+    if(!audioResumePromise){
+      audioResumePromise = ac.resume().catch(() => null).finally(() => {
+        audioResumePromise = null;
+      });
+    }
+    return audioResumePromise.then(() => ac);
   }
 
   function playTone(options){
     const ac = ensureAudio();
     if(!ac) return;
-    const now = ac.currentTime + (options.delay || 0);
-    const osc = ac.createOscillator();
-    const gain = ac.createGain();
-    osc.type = options.type || 'sine';
-    osc.frequency.setValueAtTime(options.from, now);
-    if(options.to !== undefined){
-      osc.frequency.exponentialRampToValueAtTime(Math.max(40, options.to), now + options.duration);
+
+    const scheduleTone = () => {
+      const now = ac.currentTime + (options.delay || 0);
+      const osc = ac.createOscillator();
+      const gain = ac.createGain();
+      osc.type = options.type || 'sine';
+      osc.frequency.setValueAtTime(options.from, now);
+      if(options.to !== undefined){
+        osc.frequency.exponentialRampToValueAtTime(Math.max(40, options.to), now + options.duration);
+      }
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.linearRampToValueAtTime(options.volume || 0.08, now + Math.min(0.02, options.duration * 0.35));
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + options.duration);
+      osc.connect(gain);
+      gain.connect(ac.destination);
+      osc.start(now);
+      osc.stop(now + options.duration + 0.03);
+    };
+
+    if(ac.state !== 'running'){
+      primeAudio().then((runningAudio) => {
+        if(!runningAudio || runningAudio.state !== 'running') return;
+        scheduleTone();
+      }).catch(() => {});
+      return;
     }
-    gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.linearRampToValueAtTime(options.volume || 0.05, now + Math.min(0.02, options.duration * 0.35));
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + options.duration);
-    osc.connect(gain);
-    gain.connect(ac.destination);
-    osc.start(now);
-    osc.stop(now + options.duration + 0.03);
+
+    scheduleTone();
   }
 
   function playSound(kind){
+    if(settings.muted) return;
     switch(kind){
-      case 'jump': playTone({ from: 280, to: 520, duration: 0.12, type: 'triangle', volume: 0.055 }); break;
-      case 'slide': playTone({ from: 180, to: 120, duration: 0.1, type: 'square', volume: 0.03 }); break;
-      case 'land': playTone({ from: 130, to: 80, duration: 0.08, type: 'sine', volume: 0.035 }); break;
-      case 'coin': playTone({ from: 760, to: 980, duration: 0.07, type: 'triangle', volume: 0.032 }); break;
+      case 'jump': playTone({ from: 300, to: 620, duration: 0.12, type: 'triangle', volume: 0.075 }); break;
+      case 'slide': playTone({ from: 180, to: 120, duration: 0.1, type: 'square', volume: 0.055 }); break;
+      case 'land': playTone({ from: 140, to: 82, duration: 0.09, type: 'sine', volume: 0.05 }); break;
+      case 'coin': playTone({ from: 820, to: 1080, duration: 0.08, type: 'triangle', volume: 0.055 }); break;
       case 'beacon':
-        playTone({ from: 310, to: 640, duration: 0.16, type: 'triangle', volume: 0.05 });
-        playTone({ from: 640, to: 920, duration: 0.14, type: 'sine', volume: 0.03, delay: 0.04 });
+        playTone({ from: 340, to: 720, duration: 0.16, type: 'triangle', volume: 0.075 });
+        playTone({ from: 720, to: 980, duration: 0.15, type: 'sine', volume: 0.05, delay: 0.04 });
         break;
-      case 'shield': playTone({ from: 420, to: 760, duration: 0.18, type: 'sine', volume: 0.04 }); break;
-      case 'magnet': playTone({ from: 230, to: 430, duration: 0.16, type: 'square', volume: 0.03 }); break;
-      case 'boost': playTone({ from: 220, to: 740, duration: 0.18, type: 'sawtooth', volume: 0.035 }); break;
-      case 'shield-hit': playTone({ from: 520, to: 210, duration: 0.18, type: 'triangle', volume: 0.05 }); break;
-      case 'hit': playTone({ from: 170, to: 68, duration: 0.22, type: 'sawtooth', volume: 0.06 }); break;
+      case 'shield': playTone({ from: 440, to: 820, duration: 0.18, type: 'sine', volume: 0.065 }); break;
+      case 'magnet': playTone({ from: 240, to: 470, duration: 0.16, type: 'square', volume: 0.055 }); break;
+      case 'boost': playTone({ from: 240, to: 820, duration: 0.18, type: 'sawtooth', volume: 0.06 }); break;
+      case 'shield-hit': playTone({ from: 540, to: 210, duration: 0.18, type: 'triangle', volume: 0.075 }); break;
+      case 'hit': playTone({ from: 170, to: 68, duration: 0.22, type: 'sawtooth', volume: 0.09 }); break;
+      case 'gameover': playTone({ from: 150, to: 72, duration: 0.32, type: 'sawtooth', volume: 0.11 }); break;
       default: break;
     }
   }
@@ -504,14 +602,32 @@
 
   function renderScoreRows(scores, pendingName){
     if(!scoreList) return;
-    const rows = scores.length ? scores : [{ name: '------', score: 0, pending: false }];
+    const rows = scores.length ? scores : [{ rank: 1, name: '------', score: 0, pending: false }];
     const fragment = document.createDocumentFragment();
     rows.forEach((entry, index) => {
       const name = entry.score > 0 || entry.name ? formatArcadeName(entry.name || pendingName || '') : '------';
       const pendingClass = entry.pending ? ' is-pending' : '';
-      fragment.appendChild(buildScoreRow('score-row' + pendingClass, '#' + String(index + 1).padStart(2, '0'), name, String(entry.score)));
+      const rank = entry.rank || (index + 1);
+      fragment.appendChild(buildScoreRow('score-row' + pendingClass, '#' + String(rank).padStart(2, '0'), name, String(entry.score)));
     });
     domApi.replace(scoreList, [fragment]);
+  }
+
+  function getModalScoreRows(scores){
+    if(!scores.length) return [];
+    let focusIndex = scores.findIndex((entry) => entry.pending);
+    if(focusIndex === -1 && scoreEntryState.savedEntry){
+      focusIndex = scores.findIndex((entry) => entry.createdAt === scoreEntryState.savedEntry.createdAt);
+    }
+    if(focusIndex === -1) focusIndex = Math.max(0, scores.length - 1);
+    const start = clamp(focusIndex - 1, 0, Math.max(0, scores.length - 3));
+    return scores.slice(start, start + 3).map((entry, index) => ({
+      rank: start + index + 1,
+      name: entry.name,
+      score: entry.score,
+      pending: !!entry.pending,
+      createdAt: entry.createdAt
+    }));
   }
 
   function getScorePreview(){
@@ -530,8 +646,9 @@
   }
 
   function getScoreModalSnapshot(){
+    const preview = getScorePreview();
     return JSON.stringify({
-      scores: getScorePreview(),
+      scores: getModalScoreRows(preview),
       qualifies: scoreEntryState.qualifies,
       saved: scoreEntryState.saved,
       finalScore: Math.floor(state.scorecard.finalScore || state.score),
@@ -556,22 +673,22 @@
       saveScoreBtn.textContent = scoreEntryState.saved ? 'Saved to Top 10' : 'Save Score';
     }
     if(scoreModalStatus){
-      if(scoreEntryState.saved) scoreModalStatus.textContent = 'Saved to the local top 10';
-      else if(scoreEntryState.qualifies) scoreModalStatus.textContent = 'New high score candidate';
-      else scoreModalStatus.textContent = 'Top 10 unchanged';
+      if(scoreEntryState.saved) scoreModalStatus.textContent = 'Saved to the leaderboard';
+      else if(scoreEntryState.qualifies) scoreModalStatus.textContent = 'Leaderboard spot unlocked';
+      else scoreModalStatus.textContent = 'Leaderboard unchanged';
     }
     if(scoreModalSubtitle){
       scoreModalSubtitle.textContent = scoreEntryState.qualifies
-        ? 'You made the board. Enter your name and lock the run in.'
-        : 'This run did not reach the top 10 yet, but the leaderboard is right here.';
+        ? 'You made the board. Add your name and lock the run in.'
+        : 'This run missed the board, but the leaderboard is right here.';
     }
     if(scoreEntryHint){
       scoreEntryHint.textContent = scoreEntryState.saved
-        ? 'Saved. You can replay immediately or open the full scorecard page.'
-        : 'Use up to 6 letters. The board updates live while you type.';
+        ? 'Saved. You can jump back in or open the full scorecard.'
+        : 'Use up to 6 letters. The list updates while you type.';
     }
-    if(scoreListNote) scoreListNote.textContent = scoreEntryState.qualifies ? 'Preview updates live' : 'Local machine';
-    renderScoreRows(getScorePreview(), cleanName);
+    if(scoreListNote) scoreListNote.textContent = scoreEntryState.qualifies || scoreEntryState.saved ? 'Nearby scores' : 'Top 10 cutoff';
+    renderScoreRows(getModalScoreRows(getScorePreview()), cleanName);
   }
 
   function hideScoreModal(){
@@ -599,8 +716,10 @@
       toast('Enter a name to save');
       return;
     }
-    if(scoresApi) scoresApi.insert({ name: finalName, score: Math.floor(state.scorecard.finalScore), createdAt: Date.now() });
+    const savedEntry = { name: finalName, score: Math.floor(state.scorecard.finalScore), createdAt: Date.now() };
+    if(scoresApi) scoresApi.insert(savedEntry);
     scoreEntryState.saved = true;
+    scoreEntryState.savedEntry = savedEntry;
     state.scorecard.name = finalName;
     if(scoreNameInput) scoreNameInput.value = finalName;
     toast('Score saved for ' + finalName);
@@ -686,14 +805,14 @@
     ensureWorldAhead();
   }
 
-  function startRun(options = {}){
+  function resetRunState(options = {}){
     const tutorialRequested = !!options.tutorial;
-    ensureAudio();
-    hideScoreModal();
-    state.mode = 'playing';
-    state.difficulty = tutorialRequested ? 'normal' : settings.superDifficulty ? 'super' : 'normal';
+    const allowAutoTutorial = options.allowAutoTutorial !== false;
+    state.mode = options.mode || 'playing';
+    state.difficulty = tutorialRequested ? 'normal' : options.difficulty || (settings.superDifficulty ? 'super' : 'normal');
     state.score = 0;
     state.lives = STARTING_LIVES;
+    state.maxLives = STARTING_LIVES;
     state.speed = getBaseSpeed();
     state.speedTarget = getBaseSpeed();
     state.position = 0;
@@ -714,30 +833,47 @@
     state.boost = 0;
     state.hitFlash = 0;
     state.shake = 0;
+    state.gameOverHold = 0;
+    state.attractResetTimer = 0;
+    state.attractThinkTimer = 0;
     state.warning = '';
     state.warningTimer = 0;
     state.toast = { text: '', timer: 0 };
+    state.oneUpTimer = 0;
     state.currentTag = 'Dust Run';
-    state.action = 'Run';
+    state.action = state.mode === 'menu' ? 'Demo' : 'Run';
     state.dayClock = 0;
     state.weatherClock = 0;
     state.skyShift = 0;
     state.playerScreenX = VIEW_W * 0.5;
     state.playerScreenY = getPlayerTargetY();
-    state.tutorial.active = tutorialRequested || shouldRunTutorial();
+    state.tutorial.active = tutorialRequested || (allowAutoTutorial && shouldRunTutorial());
     state.tutorial.step = 0;
     state.tutorial.lane = false;
     state.tutorial.jump = false;
     state.tutorial.power = false;
     state.tutorial.announcedStep = -1;
-    state.run = { coins: 0, beacons: 0, passed: 0, boosts: 0 };
+    state.run = { coins: 0, beacons: 0, passed: 0, boosts: 0, extraLivesEarned: 0 };
     state.scorecard.name = '';
     state.scorecard.finalScore = 0;
     scoreEntryState.qualifies = false;
     scoreEntryState.saved = false;
+    scoreEntryState.savedEntry = null;
     if(scoreNameInput) scoreNameInput.value = '';
     resetWorld();
     if(state.tutorial.active) announceTutorialStep(0, true);
+  }
+
+  function startRun(options = {}){
+    primeAudio();
+    hideScoreModal();
+    resetRunState({ mode: 'playing', tutorial: !!options.tutorial, allowAutoTutorial: true });
+    updateSidebar(true);
+  }
+
+  function startAttractMode(){
+    hideScoreModal();
+    resetRunState({ mode: 'menu', tutorial: false, allowAutoTutorial: false, difficulty: 'normal' });
     updateSidebar(true);
   }
 
@@ -748,13 +884,23 @@
 
   function gameOver(){
     state.mode = 'gameover';
+    state.gameOverHold = GAMEOVER_HOLD_DURATION;
+    state.recovery = 0;
+    state.hitFlash = 0;
+    state.shake = 0;
+    state.warning = '';
+    state.warningTimer = 0;
+    state.toast = { text: '', timer: 0 };
+    state.oneUpTimer = 0;
     state.best = Math.max(state.best, Math.floor(state.score));
     localStorage.setItem(STORAGE_KEYS.best, String(state.best));
     state.scorecard.finalScore = Math.floor(state.score);
     state.scorecard.name = '';
     scoreEntryState.qualifies = scoreQualifies(state.scorecard.finalScore);
     scoreEntryState.saved = false;
-    openScoreModal();
+    scoreEntryState.savedEntry = null;
+    playSound('gameover');
+    hideScoreModal();
     updateSidebar(true);
   }
 
@@ -764,11 +910,11 @@
     updateSidebar(true);
   }
 
-  function onLane(dir){
-    if(state.mode !== 'playing') return;
+  function onLane(dir, options = {}){
+    if(state.mode !== 'playing' && !options.force) return;
     const nextLane = clamp(state.lane + dir, 0, 2);
     if(state.tutorial.active && nextLane !== state.lane) state.tutorial.lane = true;
-    if(nextLane !== state.lane) vibrate(8);
+    if(nextLane !== state.lane && !isAttractMode()) vibrate(8);
     state.lane = nextLane;
   }
 
@@ -777,18 +923,21 @@
   }
 
   function performJump(){
+    const attract = isAttractMode();
     state.jumpVelocity = JUMP_VELOCITY;
     state.jumpBuffer = 0;
     state.groundGrace = 0;
     state.grounded = false;
     state.landImpact = 0.08;
     if(state.tutorial.active) state.tutorial.jump = true;
-    playSound('jump');
-    vibrate(12);
+    if(!attract){
+      playSound('jump');
+      vibrate(12);
+    }
   }
 
-  function jump(){
-    if(state.mode !== 'playing') return;
+  function jump(options = {}){
+    if(state.mode !== 'playing' && !options.force) return;
     state.jumpBuffer = JUMP_BUFFER_TIME;
     if(canJumpNow()) performJump();
   }
@@ -846,7 +995,7 @@
   }
 
   function addCoinTrail(startSegment, lane, count, spacing, offset){
-    for(let i = 0; i < count; i++) addItemAt(startSegment + i * (spacing || 1), lane, 'coin', offset === undefined ? 0.54 : offset);
+    for(let i = 0; i < count; i += 2) addItemAt(startSegment + i * (spacing || 1), lane, 'coin', offset === undefined ? 0.54 : offset);
   }
 
   function addRewardSet(startSegment, lane, rewardKind){
@@ -857,7 +1006,7 @@
   function addZigZagCoins(startSegment, startLane, count, offset){
     let lane = startLane;
     for(let i = 0; i < count; i++){
-      addItemAt(startSegment + i, lane, 'coin', offset === undefined ? 0.55 : offset);
+      if(i % 2 === 0) addItemAt(startSegment + i, lane, 'coin', offset === undefined ? 0.55 : offset);
       if(i < count - 1 && maybe(0.72)){
         const dir = maybe(0.5) ? -1 : 1;
         lane = clamp(lane + dir, 0, 2);
@@ -1357,17 +1506,20 @@
 
   function resolveHit(item, message){
     if(state.recovery > 0 || item.resolved) return;
+    const attract = isAttractMode();
     item.resolved = true;
     if(state.shield > 0){
       state.shield = 0;
       state.recovery = 0.7;
-      state.hitFlash = HIT_FLASH_DURATION * 0.6;
-      state.shake = 0.18;
-      state.warning = 'SHIELD ABSORBED THE HIT';
-      state.warningTimer = 0.8;
-      toast('Shield saved the run');
-      playSound('shield-hit');
-      vibrate([14, 18, 14]);
+      state.hitFlash = HIT_FLASH_DURATION * (attract ? 0.32 : 0.6);
+      state.shake = attract ? 0.08 : 0.18;
+      if(!attract){
+        state.warning = 'Shield saved you';
+        state.warningTimer = 0.8;
+        toast('Shield saved you');
+        playSound('shield-hit');
+        vibrate([14, 18, 14]);
+      }
       return;
     }
     state.lives--;
@@ -1382,46 +1534,100 @@
     state.groundGrace = GROUND_GRACE_TIME;
     state.grounded = true;
     state.lane = 1;
-    toast('Life lost - ' + state.lives + ' left');
-    playSound('hit');
-    vibrate([20, 24, 20]);
-    if(state.lives <= 0) gameOver();
+    if(state.lives <= 0){
+      if(attract){
+        state.recovery = 0;
+        state.attractResetTimer = ATTRACT_RESET_DELAY;
+        state.action = 'Demo';
+      } else {
+        gameOver();
+      }
+      return;
+    }
+    if(!attract){
+      toast('Life lost');
+      playSound('hit');
+      vibrate([20, 24, 20]);
+    } else {
+      state.warning = '';
+      state.warningTimer = 0;
+      state.toast = { text: '', timer: 0 };
+      state.oneUpTimer = 0;
+    }
+  }
+
+  function getPickupScore(kind){
+    if(kind === 'coin') return 100;
+    if(kind === 'beacon') return 500;
+    if(kind === 'shield') return 150;
+    if(kind === 'magnet') return 150;
+    if(kind === 'boost') return 180;
+    return 0;
+  }
+
+  function getPickupLabel(kind){
+    if(kind === 'coin' || kind === 'beacon') return '+' + String(getPickupScore(kind));
+    if(kind === 'shield') return 'SHIELD';
+    if(kind === 'magnet') return 'MAGNET';
+    if(kind === 'boost') return 'BOOST';
+    return '';
+  }
+
+  function maybeAwardExtraLifeFromCoins(attract){
+    const earnedMilestones = Math.floor(state.run.coins / COINS_PER_EXTRA_LIFE);
+    if(earnedMilestones <= state.run.extraLivesEarned) return;
+    state.run.extraLivesEarned = earnedMilestones;
+    state.lives++;
+    state.maxLives = Math.max(state.maxLives, state.lives);
+    if(!attract){
+      state.oneUpTimer = ONE_UP_DURATION;
+      playSound('beacon');
+      vibrate([12, 20, 12]);
+      updateSidebar(true);
+    }
   }
 
   function collectItem(item){
     if(item.resolved) return;
+    const attract = isAttractMode();
     item.resolved = true;
+    const pickupScore = getPickupScore(item.kind);
+    if(pickupScore > 0) state.score += pickupScore;
     if(item.kind === 'coin'){
-      state.score += 100;
       state.run.coins++;
-      playSound('coin');
+      maybeAwardExtraLifeFromCoins(attract);
+      if(!attract) playSound('coin');
     } else if(item.kind === 'beacon'){
-      state.score += 500;
       state.run.beacons++;
-      toast('Beacon secured');
-      playSound('beacon');
-      vibrate(14);
+      if(!attract){
+        toast('Beacon collected');
+        playSound('beacon');
+        vibrate(14);
+      }
     } else if(item.kind === 'shield'){
       state.shield = SHIELD_DURATION;
-      state.score += 150;
-      toast('Shield online');
-      playSound('shield');
-      vibrate([10, 18, 10]);
+      if(!attract){
+        toast('Shield ready');
+        playSound('shield');
+        vibrate([10, 18, 10]);
+      }
     } else if(item.kind === 'magnet'){
       state.magnet = MAGNET_DURATION;
-      state.score += 150;
-      toast('Magnet active');
-      playSound('magnet');
-      vibrate([10, 18, 10]);
+      if(!attract){
+        toast('Magnet ready');
+        playSound('magnet');
+        vibrate([10, 18, 10]);
+      }
     } else if(item.kind === 'boost'){
       state.boost = BOOST_DURATION;
       state.speed = Math.max(state.speed, getBaseSpeed() + 58);
       state.speedTarget = Math.max(state.speedTarget, getMaxSpeed() + getBoostExtraSpeed() * 0.55);
-      state.score += 180;
       state.run.boosts++;
-      toast('Boost engaged');
-      playSound('boost');
-      vibrate([12, 20, 12]);
+      if(!attract){
+        toast('Boost on');
+        playSound('boost');
+        vibrate([12, 20, 12]);
+      }
     }
     if(state.tutorial.active && (item.kind === 'shield' || item.kind === 'magnet' || item.kind === 'boost')) state.tutorial.power = true;
   }
@@ -1438,6 +1644,104 @@
 
   function getPlayerDistance(itemZ, position){
     return itemZ - (position + PLAYER_PLANE_Z);
+  }
+
+  function findNearestAttractHazard(lane, kind, maxDistance){
+    let nearestItem = null;
+    let nearestDistance = Infinity;
+    for(const item of state.items){
+      if(item.resolved || item.kind !== kind || item.lane !== lane) continue;
+      const distance = getPlayerDistance(item.z, state.position);
+      if(distance < -3 || distance > maxDistance || distance >= nearestDistance) continue;
+      nearestDistance = distance;
+      nearestItem = item;
+    }
+    return nearestItem ? { item: nearestItem, distance: nearestDistance } : null;
+  }
+
+  function chooseAttractLane(){
+    const scores = [-0.2, 0, -0.2];
+    for(const item of state.items){
+      if(item.resolved) continue;
+      const distance = getPlayerDistance(item.z, state.position);
+      if(distance < -4 || distance > 56) continue;
+      if(item.kind === 'coin'){
+        scores[item.lane] += distance < 20 ? 2.3 : 1.15;
+      } else if(item.kind === 'beacon'){
+        scores[item.lane] += distance < 24 ? 5.4 : 3.8;
+      } else if(item.kind === 'shield' || item.kind === 'magnet' || item.kind === 'boost'){
+        scores[item.lane] += distance < 24 ? 4.8 : 3.2;
+      } else if(item.kind === 'obstacle'){
+        scores[item.lane] -= distance < 13 ? 18 : distance < 24 ? 8.5 : 3.4;
+      } else if(item.kind === 'pit'){
+        scores[item.lane] -= distance < 10 ? 6.2 : distance < 22 ? 2.2 : 0.9;
+      }
+    }
+
+    for(let lane = 0; lane < 3; lane++){
+      scores[lane] -= Math.abs(lane - state.laneVisual) * 0.7;
+      const obstacle = findNearestAttractHazard(lane, 'obstacle', 18);
+      const pit = findNearestAttractHazard(lane, 'pit', 12);
+      if(obstacle) scores[lane] -= 16 - obstacle.distance * 0.45;
+      if(pit && !canJumpNow()) scores[lane] -= 8 - pit.distance * 0.35;
+    }
+
+    let bestLane = state.lane;
+    let bestScore = -Infinity;
+    for(let lane = 0; lane < 3; lane++){
+      if(scores[lane] > bestScore){
+        bestScore = scores[lane];
+        bestLane = lane;
+      }
+    }
+    return bestLane;
+  }
+
+  function updateAttract(dt){
+    if(state.attractResetTimer > 0){
+      state.attractResetTimer = Math.max(0, state.attractResetTimer - dt);
+      if(state.attractResetTimer === 0){
+        startAttractMode();
+      }
+      return;
+    }
+
+    state.attractThinkTimer -= dt;
+    if(state.attractThinkTimer <= 0){
+      state.attractThinkTimer = ATTRACT_THINK_INTERVAL;
+
+      const currentLane = state.lane;
+      const obstacleAhead = findNearestAttractHazard(currentLane, 'obstacle', 18);
+      const pitAhead = findNearestAttractHazard(currentLane, 'pit', 13);
+      let targetLane = chooseAttractLane();
+
+      if(obstacleAhead && obstacleAhead.distance < 10.8){
+        const escapeLane = chooseAttractLane();
+        if(escapeLane !== currentLane) targetLane = escapeLane;
+      }
+
+      if(pitAhead && pitAhead.distance < 8.8){
+        if(canJumpNow() || state.jumpHeight > 0.16){
+          jump({ force: true });
+        } else {
+          targetLane = chooseAttractLane();
+        }
+      }
+
+      if(targetLane > state.lane) onLane(1, { force: true });
+      else if(targetLane < state.lane) onLane(-1, { force: true });
+    }
+
+    update(dt);
+    if(state.mode === 'menu'){
+      state.action = state.hitFlash > 0
+        ? 'Demo'
+        : !state.grounded
+          ? 'Demo Jump'
+          : Math.abs(state.lane - state.laneVisual) > 0.04
+            ? 'Demo Shift'
+            : 'Demo';
+    }
   }
 
   function overlapsZone(previousDistance, currentDistance, zone){
@@ -1472,8 +1776,8 @@
       if(!overlapsZone(previousDistance, distance, zone)) continue;
       if(!hazardLaneHit) continue;
 
-      if(item.kind === 'pit' && state.jumpHeight < 0.62){ resolveHit(item, 'JUMP THE FLOOR BREAK'); return; }
-      if(item.kind === 'obstacle'){ resolveHit(item, 'CHANGE LANE TO AVOID THE WALL'); return; }
+      if(item.kind === 'pit' && state.jumpHeight < 0.62){ resolveHit(item, 'Jump the break'); return; }
+      if(item.kind === 'obstacle'){ resolveHit(item, 'Switch lanes to avoid the wall'); return; }
     }
 
   }
@@ -1510,7 +1814,7 @@
     syncLabel(powerLabel, 'power', powerState);
     syncLabel(pauseBtn, 'pauseLabel', state.mode === 'paused' ? 'Resume' : 'Pause');
     syncLabel(startBtn, 'startLabel', state.mode === 'menu' ? 'Start Run' : 'Restart Run');
-    syncLabel(hapticsBtn, 'hapticsLabel', settings.haptics ? 'Haptics: On' : 'Haptics: Off');
+    syncLabel(soundBtn, 'soundLabel', settings.muted ? 'Sound: Off' : 'Sound: On');
     syncLabel(touchBtn, 'touchLabel', settings.touchButtons ? 'Controls: On' : 'Controls: Off');
     syncLabel(difficultyBtn, 'difficultyLabel', settings.superDifficulty ? 'Difficulty: Super' : 'Difficulty: Normal');
     sidebarRefreshTimer = SIDEBAR_REFRESH_INTERVAL;
@@ -1524,6 +1828,7 @@
     if(state.shake > 0) state.shake = Math.max(0, state.shake - dt);
     if(state.recovery > 0) state.recovery = Math.max(0, state.recovery - dt);
     if(state.toast.timer > 0) state.toast.timer = Math.max(0, state.toast.timer - dt);
+    if(state.oneUpTimer > 0) state.oneUpTimer = Math.max(0, state.oneUpTimer - dt);
     if(state.shield > 0) state.shield = Math.max(0, state.shield - dt);
     if(state.magnet > 0) state.magnet = Math.max(0, state.magnet - dt);
     if(state.boost > 0) state.boost = Math.max(0, state.boost - dt);
@@ -1541,13 +1846,14 @@
         state.groundGrace = GROUND_GRACE_TIME;
         if(airborne){
           state.landImpact = 0.22;
-          playSound('land');
+          if(!isAttractMode()) playSound('land');
         }
       }
     }
 
     if(state.grounded && state.jumpBuffer > 0 && canJumpNow()) performJump();
     if(state.landImpact > 0) state.landImpact = Math.max(0, state.landImpact - dt * 2.3);
+    state.runnerAnim += !state.grounded ? dt * 5.2 : dt * 9.4;
 
     const ramp = clamp(state.distance / 2600, 0, 1);
     state.speedTarget = lerp(getBaseSpeed(), getMaxSpeed(), ramp) + (state.boost > 0 ? getBoostExtraSpeed() : 0);
@@ -1660,15 +1966,19 @@
     state.skyShift += dt * 0.005;
     const day = getCycleState(DAY_STATES, state.dayClock, 34);
     const weather = getCycleState(WEATHER_STATES, state.weatherClock, 18);
+    const dayCurrent = day.current || DAY_STATES[0];
+    const dayNext = day.next || dayCurrent;
+    const weatherCurrent = weather.current || WEATHER_STATES[0];
+    const weatherNext = weather.next || weatherCurrent;
     ctx.fillStyle = getCachedSkyGradient(day);
     ctx.fillRect(0, 0, VIEW_W, VIEW_H);
 
-    ctx.fillStyle = mixRgba(day.current.glow, day.next.glow, day.t);
+    ctx.fillStyle = mixRgba(dayCurrent.glow, dayNext.glow, day.t);
     ctx.beginPath();
     ctx.arc(VIEW_W * 0.5, VIEW_H * 0.16, 170, 0, Math.PI * 2);
     ctx.fill();
 
-    const night = day.current.name === 'Night' || day.next.name === 'Night';
+    const night = dayCurrent.name === 'Night' || dayNext.name === 'Night';
     if(night){
       ctx.fillStyle = 'rgba(214,226,255,0.76)';
       ctx.beginPath();
@@ -1681,14 +1991,14 @@
       ctx.globalAlpha = 1;
     }
 
-    const haze = lerp(weather.current.haze, weather.next.haze, weather.t);
-    const dust = lerp(weather.current.dust, weather.next.dust, weather.t);
+    const haze = lerp(weatherCurrent.haze, weatherNext.haze, weather.t);
+    const dust = lerp(weatherCurrent.dust, weatherNext.dust, weather.t);
     drawSkylineBand(skyline.far, VIEW_H * 0.45, night ? 'rgba(24,25,39,0.62)' : 'rgba(56,43,33,0.46)', state.skyShift * 20, 1, night);
     drawSkylineBand(skyline.mid, VIEW_H * 0.48, night ? 'rgba(26,27,42,0.72)' : 'rgba(48,36,27,0.56)', state.skyShift * 28, 1.06, night);
     drawSkylineBand(skyline.near, VIEW_H * 0.5, night ? 'rgba(28,29,46,0.82)' : 'rgba(42,31,23,0.72)', state.skyShift * 36, 1.14, night);
     drawSetpieceBackdrop(state.currentTag, night);
 
-    ctx.fillStyle = mixRgba('rgba(0,0,0,0)', weather.current.overlay, weather.t);
+    ctx.fillStyle = mixRgba('rgba(0,0,0,0)', weatherCurrent.overlay, weather.t);
     ctx.fillRect(0, VIEW_H * 0.4, VIEW_W, VIEW_H * 0.6);
 
     if(haze > 0.01){
@@ -1919,6 +2229,9 @@
     const size = Math.max(26, point.roadHalf * draw.roadFrac * 2);
     const height = size * draw.heightRatio;
     const y = point.y - height * draw.lift;
+    const label = getPickupLabel(kind);
+    const isScorePickup = kind === 'coin' || kind === 'beacon';
+    const isPowerPickup = kind === 'shield' || kind === 'magnet' || kind === 'boost';
     ctx.save();
     ctx.globalAlpha = 0.58 + clamp((point.y - VIEW_H * HORIZON_Y) / (VIEW_H * 0.7), 0, 0.42);
     ctx.fillStyle = draw.glow;
@@ -1926,13 +2239,45 @@
     ctx.ellipse(point.x, y + height * 0.24, size * 0.42, height * 0.16, 0, 0, Math.PI * 2);
     ctx.fill();
     const image = images[kind];
-    if(image && image.complete){
+    if(imageReady(image)){
       const iconW = size * 0.78;
       const iconH = height * 0.78;
       ctx.drawImage(image, point.x - iconW / 2, y - height * 0.88, iconW, iconH);
     } else {
       ctx.fillStyle = kind === 'coin' ? '#efc57a' : kind === 'beacon' || kind === 'shield' ? '#9ddbb7' : kind === 'magnet' ? '#e1a45a' : '#c898ff';
       ctx.fillRect(point.x - size * 0.16, y - height * 0.72, size * 0.32, height * 0.32);
+    }
+    if(label){
+      const labelY = y + Math.max(16, height * 0.38);
+      const fontSize = Math.round(clamp(size * (isPowerPickup ? 0.26 : 0.24), isPowerPickup ? 12 : 11, isPowerPickup ? 20 : 18));
+      ctx.font = (isScorePickup ? '800 ' : '900 ') + fontSize + 'px system-ui';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      if(isPowerPickup){
+        const metrics = ctx.measureText(label);
+        const badgeWidth = Math.max(fontSize * 3.8, metrics.width + fontSize * 0.9);
+        const badgeHeight = Math.max(18, fontSize * 1.24);
+        const badgeX = point.x - badgeWidth * 0.5;
+        const badgeY = labelY - badgeHeight * 0.5;
+        const fill =
+          kind === 'shield' ? 'rgba(157,219,183,0.22)' :
+          kind === 'magnet' ? 'rgba(225,164,90,0.22)' :
+          'rgba(200,152,255,0.22)';
+        const stroke =
+          kind === 'shield' ? 'rgba(157,219,183,0.72)' :
+          kind === 'magnet' ? 'rgba(225,164,90,0.72)' :
+          'rgba(200,152,255,0.7)';
+        ctx.fillStyle = fill;
+        ctx.fillRect(badgeX, badgeY, badgeWidth, badgeHeight);
+        ctx.strokeStyle = stroke;
+        ctx.lineWidth = Math.max(2, fontSize * 0.14);
+        ctx.strokeRect(badgeX, badgeY, badgeWidth, badgeHeight);
+      }
+      ctx.lineWidth = Math.max(3, fontSize * 0.32);
+      ctx.strokeStyle = 'rgba(7,14,18,0.8)';
+      ctx.fillStyle = kind === 'coin' ? '#f7dc8f' : kind === 'beacon' ? '#b7f6d6' : 'rgba(232,247,255,0.94)';
+      ctx.strokeText(label, point.x, labelY);
+      ctx.fillText(label, point.x, labelY);
     }
     ctx.restore();
   }
@@ -1943,7 +2288,7 @@
     const width = Math.min(laneWidth * 0.78, Math.max(lerp(20, 52, depth), laneWidth * 0.56));
     const image = images[item && item.variant ? item.variant : 'wall1'];
     ctx.save();
-    if(image && image.complete){
+    if(imageReady(image)){
       const aspect = image.width / image.height;
       const height = width / aspect;
       ctx.drawImage(image, point.x - width * 0.5, point.y - height, width, height);
@@ -1962,7 +2307,7 @@
     const height = Math.max(lerp(10, 30, depth), width * ITEM_DRAW.pit.heightRatio);
     const image = images[item && item.variant ? item.variant : 'pit1'];
     ctx.save();
-    if(image && image.complete){
+    if(imageReady(image)){
       ctx.drawImage(image, point.x - width * 0.5, point.y - height * 0.5, width, height);
     } else {
       ctx.fillStyle = 'rgba(17,12,9,0.95)';
@@ -2069,8 +2414,7 @@
     ctx.globalAlpha = 1;
 
     const sheet = images.sheet;
-    if(sheet && sheet.complete){
-      if(state.mode === 'playing') state.runnerAnim += !state.grounded ? 0.08 : 0.18;
+    if(imageReady(sheet)){
       const frame = state.hitFlash > 0 ? 2 : !state.grounded ? 1 : Math.floor(state.runnerAnim) % 4;
       const sx = frame * 96;
       const drawW = 126;
@@ -2084,24 +2428,130 @@
     ctx.restore();
   }
 
+  function drawLivesHud(originX, originY, width, compact){
+    const panelHeight = compact ? 20 : 23;
+    const panelY = originY;
+    const lifeX = originX;
+    const lifeSize = compact ? 13 : 15;
+    const valueX = originX + (compact ? 20 : 23);
+    const centerY = panelY + panelHeight * 0.5;
+    const lifeY = centerY - lifeSize * 0.5;
+    const life = images.life;
+
+    ctx.fillStyle = 'rgba(0,255,216,0.06)';
+    ctx.fillRect(originX - 6, panelY, width + 12, panelHeight);
+    ctx.strokeStyle = 'rgba(0,255,216,0.2)';
+    ctx.strokeRect(originX - 6, panelY, width + 12, panelHeight);
+    if(imageReady(life)){
+      ctx.drawImage(life, lifeX, lifeY, lifeSize, lifeSize);
+    } else {
+      ctx.fillStyle = 'rgba(0,255,216,0.9)';
+      ctx.beginPath();
+      ctx.moveTo(lifeX + lifeSize * 0.5, lifeY);
+      ctx.lineTo(lifeX + lifeSize, lifeY + lifeSize * 0.38);
+      ctx.lineTo(lifeX + lifeSize * 0.8, lifeY + lifeSize);
+      ctx.lineTo(lifeX + lifeSize * 0.2, lifeY + lifeSize);
+      ctx.lineTo(lifeX, lifeY + lifeSize * 0.38);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.fillStyle = 'rgba(232,247,255,0.96)';
+    ctx.font = (compact ? '800 11px' : '800 12px') + ' "Trebuchet MS", sans-serif';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(formatHudCounter(state.lives), valueX, centerY + 0.5);
+    ctx.textBaseline = 'alphabetic';
+  }
+
+  function drawCoinHud(originX, originY, width, compact){
+    const progress = state.run.coins % COINS_PER_EXTRA_LIFE;
+    const panelHeight = compact ? 20 : 23;
+    const panelY = originY;
+    const coinChipX = originX;
+    const coinChipSize = compact ? 13 : 15;
+    const valueX = originX + (compact ? 20 : 23);
+    const centerY = panelY + panelHeight * 0.5;
+    const coinChipY = centerY - coinChipSize * 0.5;
+    const coin = images.coin;
+
+    ctx.fillStyle = 'rgba(255,184,77,0.13)';
+    ctx.fillRect(originX - 6, panelY, width + 12, panelHeight);
+    ctx.strokeStyle = 'rgba(255,184,77,0.3)';
+    ctx.strokeRect(originX - 6, panelY, width + 12, panelHeight);
+
+    if(imageReady(coin)){
+      ctx.drawImage(coin, coinChipX, coinChipY, coinChipSize, coinChipSize);
+    } else {
+      ctx.fillStyle = 'rgba(225,164,90,0.92)';
+      ctx.beginPath();
+      ctx.arc(coinChipX + coinChipSize * 0.5, coinChipY + coinChipSize * 0.5, compact ? 7 : 8, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.fillStyle = 'rgba(255,199,112,0.98)';
+    ctx.font = (compact ? '800 11px' : '800 12px') + ' "Trebuchet MS", sans-serif';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(formatHudCounter(progress), valueX, centerY + 0.5);
+    ctx.textBaseline = 'alphabetic';
+  }
+
+  function formatHudNumber(value){
+    return Math.floor(value).toLocaleString('en-US');
+  }
+
+  function formatHudCounter(value){
+    return String(Math.max(0, Math.floor(value))).padStart(2, '0');
+  }
+
+  function drawHudStatTile(originX, originY, width, height, label, value, palette, compact){
+    const valueText = String(value);
+    let valueSize = compact ? 12 : 14;
+    if(valueText.length >= 6) valueSize -= 1;
+    if(valueText.length >= 8) valueSize -= 1;
+
+    ctx.fillStyle = palette.fill;
+    ctx.fillRect(originX, originY, width, height);
+    ctx.strokeStyle = palette.stroke;
+    ctx.strokeRect(originX, originY, width, height);
+    ctx.fillStyle = palette.label;
+    ctx.font = (compact ? '700 7px' : '700 8px') + ' "Trebuchet MS", sans-serif';
+    ctx.fillText(label, originX + 6, originY + (compact ? 9 : 10));
+    ctx.textAlign = 'right';
+    ctx.fillStyle = palette.value;
+    ctx.font = '800 ' + valueSize + 'px "Trebuchet MS", sans-serif';
+    ctx.fillText(valueText, originX + width - 6, originY + (compact ? 20 : 23));
+    ctx.textAlign = 'left';
+  }
+
   function drawCanvasHud(){
+    if(state.mode === 'menu') return;
     ctx.save();
     const compact = isCompactViewport();
-    const left = viewFrame.left + 18;
+    const left = viewFrame.left + 14;
     const right = viewFrame.right - 18;
-    const top = viewFrame.top + 18;
-    const compactWidth = compact ? 148 : 192;
-    const compactHeight = compact ? 64 : 72;
+    const top = viewFrame.top + 14;
+    const compactWidth = compact ? 176 : 214;
+    const compactHeight = compact ? 76 : 88;
+    const tileGap = compact ? 4 : 6;
+    const tileHeight = compact ? 22 : 26;
+    const tileWidth = Math.floor((compactWidth - 18 - tileGap) / 2);
     ctx.fillStyle = 'rgba(8,17,24,0.58)';
     ctx.fillRect(left, top, compactWidth, compactHeight);
     ctx.strokeStyle = 'rgba(0,255,216,0.2)';
     ctx.strokeRect(left, top, compactWidth, compactHeight);
-    ctx.fillStyle = 'rgba(232,247,255,0.92)';
-    ctx.font = (compact ? '700 11px' : '700 12px') + ' "Trebuchet MS", sans-serif';
-    ctx.fillText('Score ' + Math.floor(state.score), left + 16, top + 24);
-    ctx.fillStyle = 'rgba(232,247,255,0.7)';
-    ctx.fillText('Best ' + Math.floor(state.best), left + 16, top + 44);
-    ctx.fillText('Lives ' + state.lives, left + (compact ? 78 : 102), top + 44);
+    drawHudStatTile(left + 9, top + 8, tileWidth, tileHeight, 'SCORE', formatHudNumber(state.score), {
+      fill: 'rgba(255,255,255,0.04)',
+      stroke: 'rgba(255,255,255,0.08)',
+      label: 'rgba(232,247,255,0.58)',
+      value: 'rgba(255,220,166,0.98)'
+    }, compact);
+    drawHudStatTile(left + 9 + tileWidth + tileGap, top + 8, tileWidth, tileHeight, 'BEST', formatHudNumber(state.best), {
+      fill: 'rgba(0,255,216,0.05)',
+      stroke: 'rgba(0,255,216,0.12)',
+      label: 'rgba(190,252,244,0.62)',
+      value: 'rgba(232,247,255,0.96)'
+    }, compact);
+    drawCoinHud(left + 9, top + (compact ? 36 : 42), compactWidth - 18, compact);
+    drawLivesHud(left + 9, top + (compact ? 58 : 65), compactWidth - 18, compact);
 
     const chips = [];
     if(state.shield > 0) chips.push({ label: 'Shield', value: state.shield / SHIELD_DURATION, color: 'rgba(157,219,183,0.9)' });
@@ -2209,7 +2659,49 @@
     ctx.restore();
   }
 
+  function drawOneUpOverlay(){
+    if(state.mode !== 'playing' || state.oneUpTimer <= 0) return;
+    const progress = 1 - clamp(state.oneUpTimer / ONE_UP_DURATION, 0, 1);
+    const alpha = clamp(state.oneUpTimer / ONE_UP_DURATION, 0, 1);
+    const centerX = (viewFrame.left + viewFrame.right) * 0.5;
+    const iconSize = isCompactViewport() ? 42 : 50;
+    const textSize = isCompactViewport() ? 28 : 34;
+    const totalHeight = iconSize + textSize + 16;
+    const topY = viewFrame.top + 54 - progress * 10;
+    const text = '1UP';
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.textAlign = 'center';
+    const panelWidth = isCompactViewport() ? 102 : 116;
+    ctx.fillStyle = 'rgba(8,17,24,0.72)';
+    ctx.fillRect(centerX - panelWidth * 0.5, topY - 10, panelWidth, totalHeight);
+    ctx.strokeStyle = 'rgba(255,184,77,0.36)';
+    ctx.strokeRect(centerX - panelWidth * 0.5, topY - 10, panelWidth, totalHeight);
+
+    const life = images.life;
+    if(imageReady(life)){
+      ctx.drawImage(life, centerX - iconSize * 0.5, topY, iconSize, iconSize);
+    } else {
+      ctx.fillStyle = 'rgba(255,184,77,0.96)';
+      ctx.beginPath();
+      ctx.moveTo(centerX, topY);
+      ctx.lineTo(centerX + iconSize * 0.5, topY + iconSize * 0.38);
+      ctx.lineTo(centerX + iconSize * 0.4, topY + iconSize);
+      ctx.lineTo(centerX - iconSize * 0.4, topY + iconSize);
+      ctx.lineTo(centerX - iconSize * 0.5, topY + iconSize * 0.38);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    ctx.fillStyle = 'rgba(255,220,166,0.98)';
+    ctx.font = '900 ' + textSize + 'px "Trebuchet MS", sans-serif';
+    ctx.fillText(text, centerX, topY + iconSize + textSize - 2);
+    ctx.restore();
+  }
+
   function drawWarningOverlay(){
+    if(state.mode === 'menu') return;
     if(state.hitFlash <= 0 && state.warningTimer <= 0) return;
     const alpha = Math.min(1, state.hitFlash / HIT_FLASH_DURATION);
     const linger = Math.min(1, state.warningTimer / 0.95);
@@ -2229,29 +2721,62 @@
     ctx.fillStyle = 'rgba(232,247,255,0.95)';
     ctx.font = '800 30px "Trebuchet MS", sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText(state.warning || 'MISSED TIMING', (viewFrame.left + viewFrame.right) * 0.5, y + 44);
+    ctx.fillText(state.warning || 'Watch the timing', (viewFrame.left + viewFrame.right) * 0.5, y + 44);
     ctx.font = '600 14px "Trebuchet MS", sans-serif';
-    ctx.fillText('Use Up to jump and Left / Right to switch lanes', (viewFrame.left + viewFrame.right) * 0.5, y + 70);
-    ctx.fillText('Lives remaining: ' + Math.max(0, state.lives), (viewFrame.left + viewFrame.right) * 0.5, y + 88);
+    ctx.fillText('Up jumps. Left and right switch lanes.', (viewFrame.left + viewFrame.right) * 0.5, y + 72);
     ctx.restore();
   }
 
-  function drawStateOverlay(){
+  function drawStateOverlay(frameNow){
     if(state.mode === 'playing') return;
     const centerX = (viewFrame.left + viewFrame.right) * 0.5;
     const centerY = viewFrame.top + viewFrame.height * 0.46;
+    const gameOverFade = state.mode === 'gameover'
+      ? clamp(state.gameOverHold / GAMEOVER_FADE_DURATION, 0, 1)
+      : 1;
     ctx.save();
+    ctx.globalAlpha = state.mode === 'gameover' ? gameOverFade : 1;
     ctx.fillStyle = 'rgba(4,9,12,0.46)';
     ctx.fillRect(viewFrame.left, viewFrame.top, viewFrame.width, viewFrame.height);
+    if(state.mode === 'menu'){
+      const pulse = 0.5 + Math.sin(frameNow * 0.0044) * 0.5;
+      const enterBlink = (Math.floor(frameNow / 520) % 2) === 0 ? 1 : 0.28;
+      const logo = images.logo;
+      if(imageReady(logo)){
+        const logoW = Math.min(360, viewFrame.width * 0.52) * (1 + pulse * 0.018);
+        const logoH = logoW * (logo.height / Math.max(1, logo.width));
+        const logoY = centerY - logoH - 26;
+        ctx.save();
+        ctx.globalAlpha = 0.96;
+        ctx.shadowColor = 'rgba(0,255,216,' + (0.18 + pulse * 0.16).toFixed(3) + ')';
+        ctx.shadowBlur = 16 + pulse * 16;
+        ctx.drawImage(logo, centerX - logoW * 0.5, logoY, logoW, logoH);
+        ctx.restore();
+      }
+      ctx.textAlign = 'center';
+      ctx.globalAlpha = enterBlink;
+      ctx.fillStyle = 'rgba(232,247,255,0.96)';
+      ctx.font = '800 42px "Trebuchet MS", sans-serif';
+      ctx.fillText('PRESS ENTER', centerX, centerY + 16);
+      ctx.restore();
+      return;
+    }
+    if(state.mode === 'gameover'){
+      const image = images.gameover;
+      if(imageReady(image)){
+        const imageW = Math.min(260, viewFrame.width * 0.42);
+        const imageH = imageW * (image.height / Math.max(1, image.width));
+        const imageY = centerY - imageH - 34;
+        ctx.globalAlpha = 0.86;
+        ctx.drawImage(image, centerX - imageW * 0.5, imageY, imageW, imageH);
+        ctx.globalAlpha = 1;
+      }
+    }
     ctx.fillStyle = 'rgba(232,247,255,0.96)';
     ctx.textAlign = 'center';
     ctx.font = '800 42px "Trebuchet MS", sans-serif';
-    const title = state.mode === 'paused' ? 'PAUSED' : state.mode === 'gameover' ? 'RUN OVER' : 'PRESS ENTER';
-    const subtitle = state.mode === 'paused' ? 'Press P to continue' : state.mode === 'gameover' ? 'Save the score or restart the route' : 'Press Enter to start';
+    const title = state.mode === 'paused' ? 'PAUSED' : state.mode === 'gameover' ? 'GAME OVER' : 'PRESS ENTER';
     ctx.fillText(title, centerX, centerY);
-    ctx.font = '600 16px "Trebuchet MS", sans-serif';
-    ctx.fillStyle = 'rgba(232,247,255,0.72)';
-    ctx.fillText(subtitle, centerX, centerY + 30);
     ctx.restore();
   }
 
@@ -2273,9 +2798,10 @@
     state.playerScreenY = lerp(state.playerScreenY, playerAnchor.y, smoothFactor);
     drawPlayer({ x: state.playerScreenX, y: state.playerScreenY }, frameNow);
     drawCanvasHud();
+    drawOneUpOverlay();
     drawTutorialOverlay();
     drawWarningOverlay();
-    drawStateOverlay();
+    drawStateOverlay(frameNow);
     ctx.restore();
   }
 
@@ -2283,6 +2809,11 @@
     const dt = Math.min(0.033, (now - lastTime) / 1000);
     lastTime = now;
     if(state.mode === 'playing') update(dt);
+    else if(state.mode === 'menu') updateAttract(dt);
+    else if(state.mode === 'gameover' && state.gameOverHold > 0){
+      state.gameOverHold = Math.max(0, state.gameOverHold - dt);
+      if(state.gameOverHold === 0 && !scoreEntryState.visible) openScoreModal();
+    }
     render(now, dt);
     requestAnimationFrame(tick);
   }
@@ -2314,6 +2845,7 @@
     clearTouchGesture();
 
     if(Math.max(adx, ady) < 26){
+      if(state.mode === 'gameover' && state.gameOverHold > 0) return;
       if(state.mode === 'menu' || state.mode === 'gameover'){
         startRun();
         return;
@@ -2337,10 +2869,11 @@
   window.addEventListener('keydown', (event) => {
     const key = event.key.toLowerCase();
     const typingInName = document.activeElement === scoreNameInput;
-    const isRunnerControl = event.key === 'ArrowLeft' || event.key === 'ArrowRight' || event.key === 'ArrowUp' || key === 'a' || key === 'd' || key === 'w' || key === 'p';
+    const isRunnerControl = event.key === 'ArrowLeft' || event.key === 'ArrowRight' || event.key === 'ArrowUp' || key === 'a' || key === 'd' || key === 'w' || event.code === 'Space';
 
     if(event.key === 'Enter'){
       event.preventDefault();
+      if(state.mode === 'gameover' && state.gameOverHold > 0) return;
       if(scoreEntryState.visible){
         if(scoreEntryState.qualifies && !scoreEntryState.saved) saveScoreEntry();
         else {
@@ -2359,14 +2892,14 @@
     if(event.key === 'ArrowLeft' || key === 'a'){ event.preventDefault(); onLane(-1); }
     if(event.key === 'ArrowRight' || key === 'd'){ event.preventDefault(); onLane(1); }
     if(event.key === 'ArrowUp' || key === 'w'){ event.preventDefault(); jump(); }
-    if(key === 'p' || event.key === 'Escape'){
+    if(event.code === 'Space' || event.key === 'Escape'){
       event.preventDefault();
       if(state.mode === 'playing' || state.mode === 'paused') togglePause();
     }
   });
 
   canvas.addEventListener('touchstart', (event) => {
-    ensureAudio();
+    primeAudio();
     const touch = event.changedTouches[0];
     if(!touch) return;
     touchGesture = {
@@ -2404,7 +2937,7 @@
 
   document.querySelectorAll('.touch-btn').forEach((button) => {
     const triggerButtonAction = () => {
-      ensureAudio();
+      primeAudio();
       const action = button.getAttribute('data-action');
       if(action === 'left') onLane(-1);
       if(action === 'right') onLane(1);
@@ -2425,13 +2958,16 @@
   if(startBtn) startBtn.addEventListener('click', startRun);
   if(pauseBtn) pauseBtn.addEventListener('click', () => { if(state.mode === 'playing' || state.mode === 'paused') togglePause(); });
   if(tutorialBtn) tutorialBtn.addEventListener('click', startTutorialRun);
-  if(hapticsBtn){
-    hapticsBtn.addEventListener('click', () => {
-      settings.haptics = !settings.haptics;
+  if(soundBtn){
+    soundBtn.addEventListener('click', () => {
+      settings.muted = !settings.muted;
       saveSettings();
       updateSidebar(true);
-      if(settings.haptics) vibrate(10);
-      toast(settings.haptics ? 'Haptics enabled' : 'Haptics disabled');
+      if(!settings.muted){
+        primeAudio();
+        playSound('coin');
+      }
+      toast(settings.muted ? 'Sound off' : 'Sound on');
     });
   }
   if(touchBtn){
@@ -2440,7 +2976,7 @@
       saveSettings();
       applyTouchButtons();
       updateSidebar(true);
-      toast(settings.touchButtons ? 'Touch buttons enabled' : 'Touch buttons hidden');
+      toast(settings.touchButtons ? 'Touch controls on' : 'Touch controls off');
     });
   }
   if(difficultyBtn){
@@ -2449,9 +2985,9 @@
       saveSettings();
       updateSidebar(true);
       if(state.mode === 'playing' || state.mode === 'paused'){
-        toast(settings.superDifficulty ? 'Super difficulty armed for the next run' : 'Normal difficulty armed for the next run');
+        toast(settings.superDifficulty ? 'Super difficulty set for the next run' : 'Normal difficulty set for the next run');
       } else {
-        toast(settings.superDifficulty ? 'Super difficulty enabled' : 'Normal difficulty enabled');
+        toast(settings.superDifficulty ? 'Super difficulty on' : 'Normal difficulty on');
       }
     });
   }
@@ -2475,7 +3011,7 @@
     window.setInterval(refreshScoreModalIfVisible, 5000);
   }
 
-  resetWorld();
+  startAttractMode();
   fitCanvas();
   applyTouchButtons();
   updateSidebar(true);
