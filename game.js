@@ -56,11 +56,12 @@
   };
 
   const storedTouchButtons = localStorage.getItem(STORAGE_KEYS.touchButtons);
+  const prefersTouchInput = (navigator.maxTouchPoints || 0) > 0 || (window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
   const settings = {
     muted: localStorage.getItem(STORAGE_KEYS.mute) === '1',
     haptics: localStorage.getItem(STORAGE_KEYS.haptics) !== '0',
     fpsLimit: Number(localStorage.getItem(STORAGE_KEYS.fps) || '60'),
-    touchButtons: storedTouchButtons === null ? false : storedTouchButtons !== '0'
+    touchButtons: storedTouchButtons === null ? prefersTouchInput : storedTouchButtons !== '0'
   };
 
   const totals = {
@@ -427,41 +428,90 @@
   });
 
   // Touch (swipes)
-  let touchStart=null;
-  canvas.addEventListener('touchstart', (e)=>{
-    ensureAudio();
-    const t=e.changedTouches[0];
-    touchStart={x:t.clientX,y:t.clientY,time:performance.now()};
-  }, {passive:true});
-  canvas.addEventListener('touchmove', (e)=>{
-    if(state.mode==='playing') e.preventDefault();
-  }, {passive:false});
-  canvas.addEventListener('touchend', (e)=>{
-    if(!touchStart) return;
-    const t=e.changedTouches[0];
-    const dx=t.clientX-touchStart.x;
-    const dy=t.clientY-touchStart.y;
-    const adx=Math.abs(dx), ady=Math.abs(dy);
-    if(Math.max(adx,ady) < 30) { // tap
-      if(state.mode==='menu' || state.mode==='gameover') startGame();
-      else if(state.mode==='playing') jump();
+  let touchGesture = null;
+
+  function getTrackedTouch(touchList){
+    if(!touchGesture) return null;
+    for(let i = 0; i < touchList.length; i++){
+      if(touchList[i].identifier === touchGesture.id) return touchList[i];
+    }
+    return null;
+  }
+
+  function clearTouchGesture(){
+    touchGesture = null;
+  }
+
+  function finishTouchGesture(touch){
+    if(!touchGesture || !touch) return;
+    const dx = touch.clientX - touchGesture.x;
+    const dy = touch.clientY - touchGesture.y;
+    const adx = Math.abs(dx);
+    const ady = Math.abs(dy);
+    clearTouchGesture();
+
+    if(Math.max(adx, ady) < 30){
+      if(state.mode === 'menu' || state.mode === 'gameover') startGame();
+      else if(state.mode === 'playing') jump();
       return;
     }
-    if(adx>ady){ onLane(dx<0?-1:+1); }
-    else { if(dy<0) jump(); else startSlide(); }
+
+    if(adx > ady) onLane(dx < 0 ? -1 : +1);
+    else if(dy < 0) jump();
+    else startSlide();
+  }
+
+  canvas.addEventListener('touchstart', (e)=>{
+    ensureAudio();
+    const touch = e.changedTouches[0];
+    if(!touch) return;
+    touchGesture = {
+      id: touch.identifier,
+      x: touch.clientX,
+      y: touch.clientY,
+      time: performance.now()
+    };
+  }, {passive:true});
+
+  window.addEventListener('touchmove', (e)=>{
+    if(!touchGesture) return;
+    const touch = getTrackedTouch(e.changedTouches) || getTrackedTouch(e.touches);
+    if(!touch) return;
+    if(state.mode === 'playing') e.preventDefault();
+  }, {passive:false});
+
+  window.addEventListener('touchend', (e)=>{
+    const touch = getTrackedTouch(e.changedTouches);
+    if(!touch) return;
+    finishTouchGesture(touch);
+  }, {passive:true});
+
+  window.addEventListener('touchcancel', (e)=>{
+    const touch = getTrackedTouch(e.changedTouches);
+    if(!touch) return;
+    clearTouchGesture();
   }, {passive:true});
 
   const touchButtons = document.querySelectorAll('.touch-btn');
   touchButtons.forEach(btn => {
-    btn.addEventListener('pointerdown', (e)=>{
-      e.preventDefault();
+    const triggerButtonAction = ()=>{
       ensureAudio();
       const action = btn.dataset.action;
       if(action==='left') onLane(-1);
       if(action==='right') onLane(+1);
       if(action==='jump') jump();
       if(action==='slide') startSlide();
+    };
+    btn.addEventListener('pointerdown', (e)=>{
+      e.preventDefault();
+      triggerButtonAction();
     });
+    if(!window.PointerEvent){
+      btn.addEventListener('click', (e)=>{
+        e.preventDefault();
+        triggerButtonAction();
+      });
+    }
   });
 
   const muteBtn = document.getElementById('muteBtn');

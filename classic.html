@@ -187,6 +187,11 @@
       .toggles::-webkit-scrollbar{ display:none; }
     }
 
+    @media (max-width: 760px){
+      body.show-touch .touch-pad{ display:flex; flex-direction:column; }
+      body.hide-touch .touch-pad{ display:none; }
+    }
+
     @media (max-width: 560px){
       .hint{
         bottom:calc(var(--safe-bottom) + 88px);
