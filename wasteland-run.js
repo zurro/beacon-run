@@ -2280,6 +2280,49 @@
     if(scoreEntryState.visible) updateScoreEntryUi();
   }
 
+  let touchGesture = null;
+
+  function getTrackedTouch(touchList){
+    if(!touchGesture || !touchList) return null;
+    for(let i = 0; i < touchList.length; i++){
+      if(touchList[i].identifier === touchGesture.id) return touchList[i];
+    }
+    return null;
+  }
+
+  function clearTouchGesture(){
+    touchGesture = null;
+  }
+
+  function finishTouchGesture(touch){
+    if(!touchGesture || !touch) return;
+    const dx = touch.clientX - touchGesture.x;
+    const dy = touch.clientY - touchGesture.y;
+    const adx = Math.abs(dx);
+    const ady = Math.abs(dy);
+    clearTouchGesture();
+
+    if(Math.max(adx, ady) < 26){
+      if(state.mode === 'menu' || state.mode === 'gameover'){
+        startRun();
+        return;
+      }
+      if(state.mode === 'playing'){
+        jump();
+      }
+      return;
+    }
+
+    if(adx > ady){
+      onLane(dx < 0 ? -1 : 1);
+      return;
+    }
+
+    if(dy < 0){
+      jump();
+    }
+  }
+
   window.addEventListener('keydown', (event) => {
     const key = event.key.toLowerCase();
     const typingInName = document.activeElement === scoreNameInput;
@@ -2311,6 +2354,37 @@
     }
   });
 
+  canvas.addEventListener('touchstart', (event) => {
+    ensureAudio();
+    const touch = event.changedTouches[0];
+    if(!touch) return;
+    touchGesture = {
+      id: touch.identifier,
+      x: touch.clientX,
+      y: touch.clientY,
+      time: performance.now()
+    };
+  }, { passive: true });
+
+  window.addEventListener('touchmove', (event) => {
+    if(!touchGesture) return;
+    const touch = getTrackedTouch(event.changedTouches) || getTrackedTouch(event.touches);
+    if(!touch) return;
+    if(state.mode === 'playing') event.preventDefault();
+  }, { passive: false });
+
+  window.addEventListener('touchend', (event) => {
+    const touch = getTrackedTouch(event.changedTouches);
+    if(!touch) return;
+    finishTouchGesture(touch);
+  }, { passive: true });
+
+  window.addEventListener('touchcancel', (event) => {
+    const touch = getTrackedTouch(event.changedTouches);
+    if(!touch) return;
+    clearTouchGesture();
+  }, { passive: true });
+
   window.addEventListener('resize', fitCanvas);
   if(window.visualViewport){
     window.visualViewport.addEventListener('resize', fitCanvas);
@@ -2318,13 +2392,23 @@
   }
 
   document.querySelectorAll('.touch-btn').forEach((button) => {
-    button.addEventListener('pointerdown', (event) => {
-      event.preventDefault();
+    const triggerButtonAction = () => {
+      ensureAudio();
       const action = button.getAttribute('data-action');
       if(action === 'left') onLane(-1);
       if(action === 'right') onLane(1);
       if(action === 'jump') jump();
+    };
+    button.addEventListener('pointerdown', (event) => {
+      event.preventDefault();
+      triggerButtonAction();
     });
+    if(!window.PointerEvent){
+      button.addEventListener('click', (event) => {
+        event.preventDefault();
+        triggerButtonAction();
+      });
+    }
   });
 
   if(startBtn) startBtn.addEventListener('click', startRun);
